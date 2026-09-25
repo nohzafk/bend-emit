@@ -56,6 +56,18 @@ A def the module keeps but the `.d.ts` does not declare:
 
 They stay in the module and still run; only their signature is missing.
 
+## Install
+
+Not on npm; install from GitHub as a dev dependency (it is a build tool):
+
+```sh
+bun add -d github:nohzafk/bend-emit
+bunx bend-emit core.bend dist      # writes dist/core.js and dist/core.d.ts
+```
+
+Commit the generated `dist/` and import from it; your package then needs
+neither Bend nor bend-emit at run time.
+
 ## Requirements
 
 `bend` on PATH -- the page bundler is the only compiler path that emits a

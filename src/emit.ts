@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 // bend-emit: turn a pure Bend core into an ordinary typed ES module.
 //
 //   bend-emit <core.bend> <outdir>
