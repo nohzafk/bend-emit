@@ -1,0 +1,4 @@
+node_modules/
+
+# test/dist/ is built beside the fixtures by test.sh, and is not shipped.
+test/dist/

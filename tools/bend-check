@@ -1,0 +1,19 @@
+#!/bin/sh
+# Run the Bend checker with a 5 s limit: tools/bend-check <file.bend> [args].
+#
+# Every proof file in this repository checks in well under a second (the
+# slowest, backbone-bend/PROOF.bend, in 1.5 s). A check that runs past 5 s is
+# a problem to fix, not a limit to raise: a large constant the checker walks
+# (BEND.md 3.3), a fuel loop unfolded into a goal (3.7), or application code
+# run inside a goal (3.5). Rethink the statement or the shape of the core.
+#
+# BEND_CHECK_SECONDS overrides the limit, for measuring only.
+
+LIMIT="${BEND_CHECK_SECONDS:-5}"
+timeout "$LIMIT" bend "$@"
+rc=$?
+if [ "$rc" = 124 ]; then
+  echo "bend-check: the checker ran past ${LIMIT} s on: $*" >&2
+  echo "bend-check: that is a problem to fix, not a limit to raise (tools/bend-check)" >&2
+fi
+exit "$rc"

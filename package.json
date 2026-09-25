@@ -1,0 +1,21 @@
+{
+  "name": "bend-emit",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^7.0.2"
+  },
+  "exports": {
+    ".": "./src/emit.ts"
+  },
+  "bin": {
+    "bend-emit": "./src/emit.ts"
+  },
+  "files": [
+    "src/emit.ts",
+    "LICENSE",
+    "README.md"
+  ]
+}
