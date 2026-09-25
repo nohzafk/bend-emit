@@ -2,6 +2,21 @@
 
 **Turn a pure Bend core into an ordinary typed ES module.**
 
+Write your pure functions in Bend; call them from TypeScript like any other
+typed import.
+
+```bend
+import Base
+
+def add(a: Nat, b: Nat) -> Nat:
+  (a + b : Nat)
+```
+
+```ts
+import { add } from "./dist/core.js";  // add(a: bigint, b: bigint): bigint
+add(2n, 3n);                           // 5n
+```
+
 ```sh
 bend-emit <core.bend> <outdir>
 ```
