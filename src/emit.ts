@@ -24,7 +24,7 @@
 
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 const HOOK = "$bend_emit_set";
 const HELD = "$bend_emit";
@@ -246,6 +246,36 @@ function bundle(core: string): string {
   }
 }
 
+// Since bend 2.0.28 the page bundler tags a constructor of an imported
+// module with that module's import path ("../../bend-schema/core/core.RCons",
+// "generics.TooBig"), where 2.0.27 wrote the bare name. The .d.ts, and every
+// host that builds values by hand (bend-schema's codec), speak bare names, so
+// the tags are put back to bare names here, as 2.0.27 wrote them. Two modules
+// may share a constructor name: every match is on a value of a known type,
+// so a tag is only ever compared within its own type, as it was before.
+export function bareTags(chunk: string, root: string): string {
+  const owner = new Map<string, string>();
+  const prefixes: [string, Set<string>][] = [];
+  const seen = new Set<string>();
+  const walk = (file: string, isRoot: boolean) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const src = readFileSync(file, "utf8");
+    const ctors = new Set(readDecls(src).datas.flatMap((d) => d.ctors.map((c) => c.name)));
+    for (const c of ctors) owner.set(c, file);
+    if (!isRoot) prefixes.push([relative(dirname(root), file).replace(/\.bend$/, ""), ctors]);
+    for (const m of src.matchAll(/^import (\.{1,2}\/\S+\.bend) as [A-Za-z_]\w*\s*$/gm)) walk(resolve(dirname(file), m[1]), false);
+  };
+  walk(root, true);
+  let out = chunk;
+  for (const [prefix, ctors] of prefixes) {
+    for (const c of ctors) out = out.split(JSON.stringify(`${prefix}.${c}`)).join(JSON.stringify(c));
+  }
+  const left = [...out.matchAll(/"([^"\s]*[./][^"\s]*)\.([A-Z]\w*)"/g)].filter((m) => owner.has(m[2]));
+  if (left.length) fail(`constructor tags still carry a module path: ${[...new Set(left.map((m) => m[0]))].join(", ")}`);
+  return out;
+}
+
 export function wrap(chunk: string, names: string[]): string {
   const calls = chunk.split(HOOK + "(").length - 1;
   if (calls !== 1) fail(`the hook ${HOOK} appears ${calls} times in the chunk, not once`);
@@ -283,7 +313,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
   const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
   const dts = declarations(modules(core), lib.filter(hostable));
-  const chunk = bundle(core);
+  const chunk = bareTags(bundle(core), core);
   const names = lib.map((d) => d.name);
   const js = wrap(chunk, names);
 

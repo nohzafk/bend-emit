@@ -69,6 +69,11 @@ describe("a core that imports another", () => {
     expect(first_or_none(list([1n, 9n]), 5n)).toEqual({ $: "Some", value: { $: "TooBig", index: 1n, got: 9n } });
     expect(wrap({ $: "Empty" })).toEqual({ $: "Wrapped", err: { $: "Empty" } });
   });
+  test("an imported constructor's tag is its bare name, whatever the compiler writes", () => {
+    const js = readFileSync(new URL("./dist/uses.js", import.meta.url), "utf8");
+    expect(js).not.toMatch(/"generics\.[A-Z]/);
+    expect(js).toContain('$:"TooBig"');
+  });
 });
 
 describe("a def with a template parameter", () => {
