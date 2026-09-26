@@ -2,8 +2,8 @@
 
 **Turn a pure Bend core into an ordinary typed ES module.**
 
-Write your pure functions in Bend; call them from TypeScript like any other
-typed import.
+Write your pure functions in [Bend](https://github.com/bendlang/bend); call
+them from TypeScript like any other typed import.
 
 ```bend
 import Base
@@ -24,7 +24,27 @@ bend-emit <core.bend> <outdir>
 writes `<outdir>/<name>.js` and `<outdir>/<name>.d.ts`, so a host can write
 `import { slots } from "./dist/core.js"` and tsc knows every def's type.
 
-## Why it exists
+## Why write it in Bend
+
+Tests check the cases you thought of. [Bend](https://github.com/bendlang/bend)
+lets you state a law about a function -- "decoding an encoded value gives it
+back", "this check passes exactly when the value conforms" -- and prove it for
+every input; the proof is checked when the file is checked. Pure logic is where
+that pays off: parsers, validators, codecs, pricing and permission rules.
+
+bend-emit is the bridge that makes the proved code usable. You keep the core
+in Bend with its proofs, and your TypeScript application imports the very
+functions the proofs are about, with their types -- not a reimplementation
+that could drift from them.
+
+For a worked example, see
+[bend-schema](https://github.com/nohzafk/bend-schema): a schema library whose
+checker is written and proved in Bend and shipped to TypeScript with
+bend-emit. It also lets one schema be reused on both sides: define it in
+TypeScript, generate its Bend form, use it in your own proved Bend functions,
+and call those back from TypeScript.
+
+## How it works
 
 Bend 2.0.27 has no library target. `bend x.bend -o x.js` builds a program: it
 runs `main` and exports nothing. Only the page bundler compiles an imported
