@@ -1,5 +1,5 @@
 #!/bin/sh
-# bend-emit's gate: the tool on five fixture cores.
+# bend-emit's gate: the tool on six fixture cores.
 #
 #   1. each fixture checks, and the tool builds it into a typed module
 #   2. the tests pass: the .d.ts text, the refusals, the values at run time
@@ -19,7 +19,7 @@ export BEND_NO_TELEMETRY
 echo "== 1. the modules =="
 # Each test file imports the module built from its fixture, so build them
 # beside the tests first -- gitignored: nothing here is published.
-for f in generics uses templated dependent dependent_user; do
+for f in generics uses templated dependent dependent_user strings; do
   tools/bend-check "test/$f.bend"
   bun src/emit.ts "test/$f.bend" test/dist > /dev/null
   echo "  $f: built"

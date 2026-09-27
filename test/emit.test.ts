@@ -122,3 +122,22 @@ describe("generic data, and types that depend on a value", () => {
     expect(() => readDecls("type F<T: Type> is Data:\n  F{x: T}\n")).toThrow("type F: a type parameter of kind Type");
   });
 });
+
+describe("String.reverse, lowered to a flat string", () => {
+  const cases = ["", "a", "abc", "héllo, wörld", "a😀b𝄞c", "\r\n\"x\""];
+  test("every loop of its shape was replaced: Base's and the fixture's own", () => {
+    const js = readFileSync(new URL("./dist/strings.js", import.meta.url), "utf8");
+    expect(js.split('Array.from(').length - 1).toBe(2);
+    // the loop's tell, `acc = c + acc; continue`, is gone -- if a bend release
+    // changes the loop's shape, this is the line that fails
+    expect(js).not.toMatch(/[\w$]+=[\w$]+\+[\w$]+;continue/);
+  });
+  test("it computes what the loop computed: reverse by code point, onto acc", async () => {
+    const mod = (await import("./dist/strings.js")).default as Record<string, (...a: string[]) => string>;
+    for (const s of cases) {
+      const want = [...s].reverse().join("");
+      expect(mod.rev(s)).toBe(want);
+      expect(mod.rev_onto(s, "|tail")).toBe(want + "|tail");
+    }
+  });
+});

@@ -276,6 +276,33 @@ export function bareTags(chunk: string, root: string): string {
   return out;
 }
 
+// Base's String.reverse, and every def with its shape, compiles to a loop that
+// prepends one character at a time: `acc = c + acc`. In JavaScriptCore each `+`
+// is a rope node, so a reversed string reaches the host as a chain of
+// one-character nodes, all alive while the string is: csv-lib's fields are
+// built backwards and reversed, and at 10 MB of CSV the ropes were half of a
+// 0.9 GB peak. The loop is matched here by its whole structure, names bound
+// once and back-referenced, so what is replaced computes, by construction,
+// `reverse(s) + acc` over code points -- whatever the def was called -- and
+// the replacement computes the same with a flat string. Nothing else in the
+// chunk is touched. `lowered` is how many were replaced.
+const ID = "([\\w$]+)";
+const REVERSE_LOOP = new RegExp(
+  `function ${ID}\\(${ID},${ID}\\)\\{for\\(;;\\)\\{let ${ID}=\\2,${ID}=\\3;` +
+    `if\\(\\4===""\\)return \\5;else\\{let ${ID}=\\4\\.codePointAt\\(0\\)>65535\\?\\4\\.slice\\(0,2\\):\\4\\[0\\];` +
+    `\\2=\\4\\.codePointAt\\(0\\)>65535\\?\\4\\.slice\\(2\\):\\4\\.slice\\(1\\),\\3=\\6\\+\\5;continue\\}\\}\\}`,
+  "g",
+);
+
+export function lowerReverse(chunk: string): { chunk: string; lowered: number } {
+  let lowered = 0;
+  const out = chunk.replace(REVERSE_LOOP, (_m, f, s, acc) => {
+    lowered++;
+    return `function ${f}(${s},${acc}){return Array.from(${s}).reverse().join("")+${acc}}`;
+  });
+  return { chunk: out, lowered };
+}
+
 export function wrap(chunk: string, names: string[]): string {
   const calls = chunk.split(HOOK + "(").length - 1;
   if (calls !== 1) fail(`the hook ${HOOK} appears ${calls} times in the chunk, not once`);
@@ -313,7 +340,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
   const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
   const dts = declarations(modules(core), lib.filter(hostable));
-  const chunk = bareTags(bundle(core), core);
+  const chunk = lowerReverse(bareTags(bundle(core), core)).chunk;
   const names = lib.map((d) => d.name);
   const js = wrap(chunk, names);
 

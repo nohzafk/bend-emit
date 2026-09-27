@@ -64,6 +64,17 @@ refused, naming the def -- a guess would be a hand-written type again. The def
 names read from the source must be exactly the names the compiled module
 exports, or nothing is written.
 
+One change is made to the compiled code. Base's `String.reverse` (and any def
+with the same loop) compiles to `acc = c + acc` per character, and in
+JavaScriptCore every `+` is a rope node: a reversed string reaches the host as
+a chain of one-character nodes, all alive while it is. The loop is matched by
+its whole structure and replaced by `Array.from(s).reverse().join("") + acc`,
+the same function over code points, returning a flat string. In csv-lib, whose
+fields are built backwards and reversed, this halved the peak memory of a 10 MB
+parse (0.9 GB to 0.42 GB). The tests check both that no such loop is left in a
+built module -- a bend release that changes its shape fails there -- and that
+the replacement answers what the loop did.
+
 ## What it leaves undeclared
 
 A def the module keeps but the `.d.ts` does not declare:
