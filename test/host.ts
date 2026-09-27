@@ -1,7 +1,7 @@
 // A host written against the generated types; test.sh requires tsc to accept
 // it, and to reject each line marked @ts-expect-error.
 
-import { sum_or_err, type BendResult, type Err } from "./dist/generics.js";
+import { sum_or_err, type BendResult, type Err } from "./dist/generics.mjs";
 
 // Every error is handled: remove a case and `never` fails to typecheck.
 export function describe(r: BendResult<Err, bigint>): string {
