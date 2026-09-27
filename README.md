@@ -46,16 +46,19 @@ and call those back from TypeScript.
 
 ## How it works
 
-Bend 2.0.27 has no library target. `bend x.bend -o x.js` builds a program: it
-runs `main` and exports nothing. Only the page bundler compiles an imported
-`.bend` file into a module, and what it emits is bend's own loader shape,
-`export default { name: fn, ... }`, which a page entry cannot re-export: an HTML
-entry keeps no exports.
+The JavaScript is bend's own. `bend <core.bend> -o <out>.mjs` is bend's
+ES-module target -- `bend --help` calls it "an ES module of its non-IO defs, for
+JS to import" -- and it is the command bend-emit runs. Bend was not always able
+to do this: before 2.0.32 `bend x.bend -o x.js` built a *program*, one that ran
+`main` and exported nothing, so a module could only be had by bundling a page
+whose entry handed it to a hook. That entry, the hook, and the wrapper that put
+the exports back are gone.
 
-So this writes a one-line page entry whose script hands the module to a hook,
-`$bend_emit_set(Core)`, runs the page bundler, and wraps the chunk it gets back --
-the hook's definition before it, the named exports after it. The hook is a free
-name, which a minifier keeps, and no global is written.
+What bend writes is `export default { name: fn, ... }`, and nothing else: bend
+emits no named exports. A host says `import { name } from "./dist/core.js"`, and
+the `.d.ts` declares those names, so bend-emit binds that object to a local name
+and re-exports each def from it. The default export stays bend's own object,
+unchanged. The module is otherwise bend's, byte for byte.
 
 The types are derived from the `.bend` source, never written by hand: the
 `type ... is Data:` blocks and the `def` headers are read, and each Bend type
@@ -64,23 +67,32 @@ refused, naming the def -- a guess would be a hand-written type again. The def
 names read from the source must be exactly the names the compiled module
 exports, or nothing is written.
 
-One change is made to the compiled code. Base's `String.reverse` (and any def
-with the same loop) compiles to `acc = c + acc` per character, and in
-JavaScriptCore every `+` is a rope node: a reversed string reaches the host as
-a chain of one-character nodes, all alive while it is. The loop is matched by
-its whole structure and replaced by `Array.from(s).reverse().join("") + acc`,
-the same function over code points, returning a flat string. In csv-lib, whose
-fields are built backwards and reversed, this halved the peak memory of a 10 MB
-parse (0.9 GB to 0.42 GB). The tests check both that no such loop is left in a
-built module -- a bend release that changes its shape fails there -- and that
-the replacement answers what the loop did.
+Two changes are made to what bend writes.
+
+Imported constructor tags are put back to bare names. Since bend 2.0.28 bend
+tags a constructor of an imported module with that module's path
+(`"generics.TooBig"`), where 2.0.27 wrote the bare name, and the `.d.ts` and
+every host that builds values by hand (bend-schema's codec) speak bare names. A
+module whose tags still carry a path is refused, not written.
+
+Base's `String.reverse` (and any def with the same loop) compiles to
+`acc = c + acc` per code point, and in JavaScriptCore every `+` is a rope node:
+a reversed string reaches the host as a chain of one-character nodes, all alive
+while it is. The loop is matched by its whole structure and replaced by
+`Array.from(s).reverse().join("") + acc`, the same function over code points,
+returning a flat string. In csv-lib, whose fields are built backwards and
+reversed, this is the difference at 10 MB of CSV between 1.2 s and 1.23 GB peak
+and 1.05 s and 0.83 GB (this Mac, `bun scale.ts` under `/usr/bin/time -l`). The
+tests check both that no such loop is left in a built module -- a bend release
+that changes its shape stops the lowering, and fails there -- and that the
+replacement answers what the loop did.
 
 ## What it leaves undeclared
 
 A def the module keeps but the `.d.ts` does not declare:
 
 - one returning `IO(...)`: an effect, whose type only the host can vouch for
-- one with a template parameter (`~f`): the bundler does not export them
+- one with a template parameter (`~f`): bend's `.mjs` target does not export them
 - one returning `Data` or `Type`, or over a type one computes (a type computed
   by a def, like `Meaning(s)`, is not a TypeScript type), or with an erased
   parameter
@@ -101,8 +113,8 @@ neither Bend nor bend-emit at run time.
 
 ## Requirements
 
-`bend` on PATH -- the page bundler is the only compiler path that emits a
-module -- and bun to run this tool.
+`bend` on PATH -- 2.0.32 or later, whose `-o <file>.mjs` target emits a module
+-- and bun to run this tool.
 
 ## Develop
 

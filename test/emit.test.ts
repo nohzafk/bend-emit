@@ -2,7 +2,7 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { declarations, readDecls } from "../src/emit";
+import { declarations, readDecls, reverseLoops } from "../src/emit";
 import { readFileSync } from "node:fs";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.js";
 import { first_or_none, wrap } from "./dist/uses.js";
@@ -72,7 +72,8 @@ describe("a core that imports another", () => {
   test("an imported constructor's tag is its bare name, whatever the compiler writes", () => {
     const js = readFileSync(new URL("./dist/uses.js", import.meta.url), "utf8");
     expect(js).not.toMatch(/"generics\.[A-Z]/);
-    expect(js).toContain('$:"TooBig"');
+    // bend's .mjs output is not minified, so the tag is written with a space.
+    expect(js).toContain('$: "TooBig"');
   });
 });
 
@@ -127,10 +128,11 @@ describe("String.reverse, lowered to a flat string", () => {
   const cases = ["", "a", "abc", "héllo, wörld", "a😀b𝄞c", "\r\n\"x\""];
   test("every loop of its shape was replaced: Base's and the fixture's own", () => {
     const js = readFileSync(new URL("./dist/strings.js", import.meta.url), "utf8");
-    expect(js.split('Array.from(').length - 1).toBe(2);
-    // the loop's tell, `acc = c + acc; continue`, is gone -- if a bend release
-    // changes the loop's shape, this is the line that fails
-    expect(js).not.toMatch(/[\w$]+=[\w$]+\+[\w$]+;continue/);
+    expect(js.split("Array.from(").length - 1).toBe(2);
+    // The matcher itself is the tell: if a bend release changes the loop's
+    // shape, the build stops lowering it and this line reports how many are
+    // left -- rather than a second pattern drifting from the one that matched.
+    expect(reverseLoops(js)).toBe(0);
   });
   test("it computes what the loop computed: reverse by code point, onto acc", async () => {
     const mod = (await import("./dist/strings.js")).default as Record<string, (...a: string[]) => string>;

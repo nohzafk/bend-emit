@@ -6,14 +6,18 @@
 // writes <outdir>/<name>.js and <outdir>/<name>.d.ts, so a host can say
 // `import { slots } from "./dist/core.js"` and tsc knows every def's type.
 //
-// bend 2.0.27 has no library target. `bend x.bend -o x.js` builds a program
-// (it runs main and exports nothing), and only the page bundler compiles an
-// imported .bend file into a module -- bend's own loader, `export default {
-// name: fn, ... }` -- which a page entry then cannot re-export: an HTML entry
-// keeps no exports. So this bundles a one-line page whose entry hands the
-// module to a hook, `$bend_emit_set(Core)`. The hook is a free name, which a
-// minifier keeps, and the chunk is wrapped with the hook's definition before it
-// and the exports after it. No global is written.
+// The JavaScript is bend's own, from bend's ES-module target:
+//
+//   bend <core.bend> -o <out>.mjs
+//
+// `bend --help` calls that "an ES module of its non-IO defs, for JS to import",
+// and it is what the build below runs. It writes bend's own loader shape,
+// `export default { name: fn, ... }`, and nothing else -- no named exports --
+// so the tail (see `exportsOf`) binds that object to a name and re-exports each
+// def from it, which is what a host's `import { name }` and the .d.ts need.
+// Before bend 2.0.32 there was no such target (`bend x.bend -o x.js` built a
+// program: it ran main and exported nothing), and the module could only be
+// reached by bundling a page whose entry handed it to a hook; that is gone.
 //
 // The types are derived from the .bend source, never written by hand: the
 // `type ... is Data:` blocks and the `def` headers are read, and each Bend type
@@ -22,11 +26,12 @@
 // again. The def names read from the source must be exactly the names the
 // compiled module exports, or nothing is written.
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
-const HOOK = "$bend_emit_set";
+// The name bend's `export default { ... }` is bound to, so the named exports
+// below have something to read. bend writes no such name of its own.
 const HELD = "$bend_emit";
 
 interface Ctor { name: string; fields: [string, string][] }
@@ -230,29 +235,26 @@ export function declarations(mods: Module[], defs: Def[]): string {
   return out.join("\n");
 }
 
-// Compile the core through bend's page bundler and return the chunk.
+// Compile the core with bend's ES-module target and return what it wrote.
 function bundle(core: string): string {
   const tmp = mkdtempSync(join(tmpdir(), "bend-lib-"));
   try {
-    writeFileSync(join(tmp, "entry.js"), `import Core from ${JSON.stringify(core)};\n${HOOK}(Core);\n`);
-    writeFileSync(join(tmp, "page.html"), `<!DOCTYPE html><html><body><script type="module" src="./entry.js"></script></body></html>`);
-    const run = Bun.spawnSync(["bend", join(tmp, "page.html"), "-o", join(tmp, "out")], { stderr: "pipe", stdout: "pipe" });
-    if (run.exitCode !== 0) fail(`bend could not bundle ${core}:\n${run.stdout.toString()}${run.stderr.toString()}`);
-    const js = readdirSync(join(tmp, "out")).filter((f) => f.endsWith(".js"));
-    if (js.length !== 1) fail(`expected one chunk from the page bundler, found ${js.length}: ${js.join(", ")}`);
-    return readFileSync(join(tmp, "out", js[0]), "utf8");
+    const out = join(tmp, "core.mjs");
+    const run = Bun.spawnSync(["bend", core, "-o", out], { stderr: "pipe", stdout: "pipe" });
+    if (run.exitCode !== 0) fail(`bend could not compile ${core}:\n${run.stdout.toString()}${run.stderr.toString()}`);
+    return readFileSync(out, "utf8");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-// Since bend 2.0.28 the page bundler tags a constructor of an imported
-// module with that module's import path ("../../bend-schema/core/core.RCons",
-// "generics.TooBig"), where 2.0.27 wrote the bare name. The .d.ts, and every
-// host that builds values by hand (bend-schema's codec), speak bare names, so
-// the tags are put back to bare names here, as 2.0.27 wrote them. Two modules
-// may share a constructor name: every match is on a value of a known type,
-// so a tag is only ever compared within its own type, as it was before.
+// Since bend 2.0.28 bend tags a constructor of an imported module with that
+// module's import path ("generics.TooBig", "../../bend-schema/core.RCons"),
+// where 2.0.27 wrote the bare name. The .d.ts, and every host that builds
+// values by hand (bend-schema's codec), speak bare names, so the tags are put
+// back to bare names here, as 2.0.27 wrote them. Two modules may share a
+// constructor name: every match is on a value of a known type, so a tag is
+// only ever compared within its own type, as it was before.
 export function bareTags(chunk: string, root: string): string {
   const owner = new Map<string, string>();
   const prefixes: [string, Set<string>][] = [];
@@ -285,33 +287,53 @@ export function bareTags(chunk: string, root: string): string {
 // once and back-referenced, so what is replaced computes, by construction,
 // `reverse(s) + acc` over code points -- whatever the def was called -- and
 // the replacement computes the same with a flat string. Nothing else in the
-// chunk is touched. `lowered` is how many were replaced.
+// module is touched.
+//
+// The shape below is bend 2.0.32's `.mjs` target, which is not the shape a
+// bundler's minified chunk has: two parameters, each copied once into a `const`,
+// a code-point peel that re-tests `> 0xFFFF` for the head and the tail, and the
+// two parameters reassigned from those copies -- the accumulation being the
+// second parameter. The emitter's own names (`$0`, `_s_0`) are matched
+// positionally, not by text; the peel and the accumulation are what pin this to
+// *this* loop, so csv-lib's other per-character loops (`$tokenize$`, `$run$`,
+// `$cut_run$`) are left alone. `lowered` is how many were replaced, and 0 --
+// bend compiling the loop well on its own -- is a result, not a failure.
 const ID = "([\\w$]+)";
-const REVERSE_LOOP = new RegExp(
-  `function ${ID}\\(${ID},${ID}\\)\\{for\\(;;\\)\\{let ${ID}=\\2,${ID}=\\3;` +
-    `if\\(\\4===""\\)return \\5;else\\{let ${ID}=\\4\\.codePointAt\\(0\\)>65535\\?\\4\\.slice\\(0,2\\):\\4\\[0\\];` +
-    `\\2=\\4\\.codePointAt\\(0\\)>65535\\?\\4\\.slice\\(2\\):\\4\\.slice\\(1\\),\\3=\\6\\+\\5;continue\\}\\}\\}`,
-  "g",
-);
+export const REVERSE_LOOP_SRC =
+  `function ${ID}\\(${ID},\\s*${ID}\\)\\s*\\{\\s*for\\s*\\(;;\\)\\s*\\{\\s*\\{\\s*` +
+  `const ${ID}\\s*=\\s*\\2;\\s*const ${ID}\\s*=\\s*\\3;\\s*` +
+  `if\\s*\\(\\4\\s*===\\s*""\\)\\s*\\{\\s*return \\5;\\s*\\}\\s*else\\s*\\{\\s*` +
+  `const ${ID}\\s*=\\s*\\(\\4\\.codePointAt\\(0\\)\\s*>\\s*0xFFFF\\s*\\?\\s*\\4\\.slice\\(0, 2\\)\\s*:\\s*\\4\\[0\\]\\);\\s*` +
+  `const ${ID}\\s*=\\s*\\(\\4\\.codePointAt\\(0\\)\\s*>\\s*0xFFFF\\s*\\?\\s*\\4\\.slice\\(2\\)\\s*:\\s*\\4\\.slice\\(1\\)\\);\\s*` +
+  `\\2\\s*=\\s*\\7;\\s*\\3\\s*=\\s*\\(\\6\\s*\\+\\s*\\5\\);\\s*continue;\\s*\\}\\s*\\}\\s*\\}\\s*\\}`;
+
+// How many loops of that shape are left in a module. The test that a built
+// module has none of them uses this, so the check is the matcher itself rather
+// than a second pattern that could drift from it.
+export function reverseLoops(module: string): number {
+  return [...module.matchAll(new RegExp(REVERSE_LOOP_SRC, "g"))].length;
+}
 
 export function lowerReverse(chunk: string): { chunk: string; lowered: number } {
   let lowered = 0;
-  const out = chunk.replace(REVERSE_LOOP, (_m, f, s, acc) => {
+  const out = chunk.replace(new RegExp(REVERSE_LOOP_SRC, "g"), (_m, f, s, acc) => {
     lowered++;
     return `function ${f}(${s},${acc}){return Array.from(${s}).reverse().join("")+${acc}}`;
   });
   return { chunk: out, lowered };
 }
 
-export function wrap(chunk: string, names: string[]): string {
-  const calls = chunk.split(HOOK + "(").length - 1;
-  if (calls !== 1) fail(`the hook ${HOOK} appears ${calls} times in the chunk, not once`);
-  if (chunk.split(HELD).length - 1 !== 1) fail(`the chunk already uses the name ${HELD}`);
-  if (/\bexport\b|\bimport\b/.test(chunk.replace(/"[^"]*"/g, ""))) fail("the chunk has an import or export of its own");
+// bend's module is `export default { name: fn, ... }` and nothing else. A host
+// says `import { name } from "./dist/core.js"`, and the .d.ts declares those
+// names, so the object is bound to HELD and each def is re-exported from it.
+// What the module exports by default stays bend's own object, unchanged.
+export function exportsOf(chunk: string, names: string[]): string {
+  const found = chunk.match(/^export /gm) ?? [];
+  if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
+  if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");
+  const body = chunk.replace(/^export default \{$/m, `const ${HELD} = {`).trimEnd();
   return [
-    `let ${HELD};`,
-    `function ${HOOK}(m) { ${HELD} = m; }`,
-    chunk.trimEnd(),
+    body,
     `export default ${HELD};`,
     ...names.filter((n) => IDENT.test(n)).map((n) => `export const ${n} = ${HELD}[${JSON.stringify(n)}];`),
     "",
@@ -322,9 +344,9 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const core = resolve(corePath);
   const { defs } = readDecls(readFileSync(core, "utf8"));
   // bend exports every filled def that is not IO (main is the usual one),
-  // except a def with a template parameter (~rule: the bundler does not export
-  // it). Of those, the .d.ts declares the defs whose types it can write: not
-  // one with an erased parameter (-A has no runtime position this tool can
+  // except a def with a template parameter (~rule: bend's .mjs target does not
+  // export it). Of those, the .d.ts declares the defs whose types it can write:
+  // not one with an erased parameter (-A has no runtime position this tool can
   // vouch for), and not one whose type depends on a value (a type computed by
   // a def, like Meaning(s), is not a TypeScript type). Those stay in the
   // module, undeclared, so the export check below still sees them.
@@ -342,7 +364,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const dts = declarations(modules(core), lib.filter(hostable));
   const chunk = lowerReverse(bareTags(bundle(core), core)).chunk;
   const names = lib.map((d) => d.name);
-  const js = wrap(chunk, names);
+  const js = exportsOf(chunk, names);
 
   outDir = resolve(outDir);
   mkdirSync(outDir, { recursive: true });
