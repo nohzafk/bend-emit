@@ -19,9 +19,6 @@
 // `export default { name: fn, ... }`, and nothing else -- no named exports --
 // so the tail (see `exportsOf`) binds that object to a name and re-exports each
 // def from it, which is what a host's `import { name }` and the .d.mts need.
-// Before bend 2.0.32 there was no such target (`bend x.bend -o x.js` built a
-// program: it ran main and exported nothing), and the module could only be
-// reached by bundling a page whose entry handed it to a hook; that is gone.
 //
 // The types are derived from the .bend source, never written by hand: the
 // `type ... is Data:` blocks and the `def` headers are read, and each Bend type
@@ -252,8 +249,23 @@ export function declarations(mods: Module[], defs: Def[]): string {
   return out.join("\n");
 }
 
+// The bend this tool is built and tested against (BEND_VERSION, beside this
+// file's package). Another version is refused, not tried: the module is
+// bend's own output, and this tool rewrites its tags and reads its exports, so
+// a compiler it was never checked against could change either without a word.
+const BEND_VERSION = readFileSync(new URL("../BEND_VERSION", import.meta.url), "utf8").trim();
+
+function checkBend(): void {
+  const run = Bun.spawnSync(["bend", "version"], { stderr: "pipe", stdout: "pipe" });
+  const have = run.exitCode === 0 ? run.stdout.toString().trim() : "";
+  if (have !== `bend ${BEND_VERSION}`) {
+    fail(`needs bend ${BEND_VERSION}; \`bend version\` on PATH says ${have ? `"${have}"` : "nothing (no bend on PATH)"}`);
+  }
+}
+
 // Compile the core with bend's ES-module target and return what it wrote.
 function bundle(core: string): string {
+  checkBend();
   const tmp = mkdtempSync(join(tmpdir(), "bend-lib-"));
   try {
     const out = join(tmp, "core.mjs");
@@ -265,11 +277,10 @@ function bundle(core: string): string {
   }
 }
 
-// Since bend 2.0.28 bend tags a constructor of an imported module with that
-// module's import path ("generics.TooBig", "../../bend-schema/core.RCons"),
-// where 2.0.27 wrote the bare name. The .d.mts, and every host that builds
-// values by hand (bend-schema's codec), speak bare names, so the tags are put
-// back to bare names here, as 2.0.27 wrote them. Two modules may share a
+// bend tags a constructor of an imported module with that module's import
+// path ("generics.TooBig", "../../bend-schema/core.RCons"). The .d.mts, and
+// every host that builds values by hand (bend-schema's codec), speak bare
+// names, so the tags are put back to bare names here. Two modules may share a
 // constructor name: every match is on a value of a known type, so a tag is
 // only ever compared within its own type, as it was before.
 export function bareTags(chunk: string, root: string): string {

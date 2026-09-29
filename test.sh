@@ -11,9 +11,16 @@
 set -e
 cd "$(dirname "$0")"
 
-# The installed compiler, wherever it is.
-PATH="$HOME/.bend/bin:$PATH"
+# The bend this tool declares (BEND_VERSION): the one in
+# ~/projects/.toolchains/bend-<v>/ if it is there, else the installed one. The
+# tool refuses any other version, and so does this gate, before anything runs.
+BEND_VERSION=$(tr -d ' \t\n\r' < BEND_VERSION)
+PATH="${BEND_TOOLCHAINS:-$HOME/projects/.toolchains}/bend-$BEND_VERSION/bin:$HOME/.bend/bin:$PATH"
 export PATH
+if [ "$(bend version 2>/dev/null)" != "bend $BEND_VERSION" ]; then
+  echo "FAIL: this gate needs bend $BEND_VERSION; bend on PATH says: $(bend version 2>&1)"
+  exit 1
+fi
 BEND_NO_TELEMETRY=1
 export BEND_NO_TELEMETRY
 
@@ -86,5 +93,23 @@ LOADER
   fi
   cat "$NODE_TMP/out"
 done
+
+echo "== 5. another bend is refused =="
+# A fake bend first on PATH that answers another version: the tool must stop
+# before it compiles anything, naming both versions.
+FAKE=$(mktemp -d)
+printf '#!/bin/sh\necho "bend 2.0.0"\n' > "$FAKE/bend"
+chmod +x "$FAKE/bend"
+if PATH="$FAKE:$PATH" bun src/emit.ts test/generics.bend "$FAKE/out" > "$FAKE/log" 2>&1; then
+  echo "FAIL: the tool built a module with bend 2.0.0"
+  exit 1
+fi
+if ! grep -q "needs bend $BEND_VERSION" "$FAKE/log" || ! grep -q "bend 2.0.0" "$FAKE/log"; then
+  cat "$FAKE/log"
+  echo "FAIL: the refusal does not name both versions"
+  exit 1
+fi
+sed 's/^/  /' "$FAKE/log"
+rm -rf "$FAKE"
 
 echo "PASS: bend-emit's gate"

@@ -60,11 +60,7 @@ and call those back from TypeScript.
 
 The JavaScript is bend's own. `bend <core.bend> -o <out>.mjs` is bend's
 ES-module target -- `bend --help` calls it "an ES module of its non-IO defs, for
-JS to import" -- and it is the command bend-emit runs. Bend was not always able
-to do this: before 2.0.32 `bend x.bend -o x.js` built a *program*, one that ran
-`main` and exported nothing, so a module could only be had by bundling a page
-whose entry handed it to a hook. That entry, the hook, and the wrapper that put
-the exports back are gone.
+JS to import" -- and it is the command bend-emit runs.
 
 What bend writes is `export default { name: fn, ... }`, and nothing else: bend
 emits no named exports. A host says `import { name } from "./dist/core.mjs"`, and
@@ -84,10 +80,9 @@ exports, or nothing is written.
 
 Two changes are made to what bend writes.
 
-Imported constructor tags are put back to bare names. Since bend 2.0.28 bend
-tags a constructor of an imported module with that module's path
-(`"generics.TooBig"`), where 2.0.27 wrote the bare name, and the `.d.mts` and
-every host that builds values by hand (bend-schema's codec) speak bare names. A
+Imported constructor tags are put back to bare names. bend tags a constructor
+of an imported module with that module's path (`"generics.TooBig"`), and the
+`.d.mts` and every host that builds values by hand (bend-schema's codec) speak bare names. A
 module whose tags still carry a path is refused, not written.
 
 ## What it leaves undeclared
@@ -123,8 +118,11 @@ change — only the module path does.
 
 ## Requirements
 
-`bend` on PATH -- 2.0.32 or later, whose `-o <file>.mjs` target emits a module
--- and bun to run this tool.
+`bend` on PATH at exactly the version in `BEND_VERSION` (2.0.34), and bun to
+run this tool. Another version is refused before anything is compiled: the
+module is bend's own output, and this tool rewrites its tags and reads its
+exports, so a compiler it was never tested against could change either
+silently. A consumer pinned to an older bend pins an older bend-emit with it.
 
 ## Develop
 
