@@ -2,7 +2,7 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { declarations, readDecls, reverseLoops } from "../src/emit";
+import { declarations, readDecls } from "../src/emit";
 import { readdirSync, readFileSync } from "node:fs";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
 import { first_or_none, wrap } from "./dist/uses.mjs";
@@ -47,7 +47,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "templated", "dependent", "dependent_user", "strings"];
+  const stems = ["generics", "uses", "templated", "dependent", "dependent_user"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -140,25 +140,5 @@ describe("generic data, and types that depend on a value", () => {
 
   test("a type parameter of a kind other than Data is refused, by name", () => {
     expect(() => readDecls("type F<T: Type> is Data:\n  F{x: T}\n")).toThrow("type F: a type parameter of kind Type");
-  });
-});
-
-describe("String.reverse, lowered to a flat string", () => {
-  const cases = ["", "a", "abc", "héllo, wörld", "a😀b𝄞c", "\r\n\"x\""];
-  test("every loop of its shape was replaced: Base's and the fixture's own", () => {
-    const js = readFileSync(new URL("./dist/strings.mjs", import.meta.url), "utf8");
-    expect(js.split("Array.from(").length - 1).toBe(2);
-    // The matcher itself is the tell: if a bend release changes the loop's
-    // shape, the build stops lowering it and this line reports how many are
-    // left -- rather than a second pattern drifting from the one that matched.
-    expect(reverseLoops(js)).toBe(0);
-  });
-  test("it computes what the loop computed: reverse by code point, onto acc", async () => {
-    const mod = (await import("./dist/strings.mjs")).default as Record<string, (...a: string[]) => string>;
-    for (const s of cases) {
-      const want = [...s].reverse().join("");
-      expect(mod.rev(s)).toBe(want);
-      expect(mod.rev_onto(s, "|tail")).toBe(want + "|tail");
-    }
   });
 });

@@ -282,51 +282,6 @@ export function bareTags(chunk: string, root: string): string {
   return out;
 }
 
-// Base's String.reverse, and every def with its shape, compiles to a loop that
-// prepends one character at a time: `acc = c + acc`. In JavaScriptCore each `+`
-// is a rope node, so a reversed string reaches the host as a chain of
-// one-character nodes, all alive while the string is: csv-lib's fields are
-// built backwards and reversed, and at 10 MB of CSV the ropes were half of a
-// 0.9 GB peak. The loop is matched here by its whole structure, names bound
-// once and back-referenced, so what is replaced computes, by construction,
-// `reverse(s) + acc` over code points -- whatever the def was called -- and
-// the replacement computes the same with a flat string. Nothing else in the
-// module is touched.
-//
-// The shape below is bend 2.0.32's `.mjs` target, which is not the shape a
-// bundler's minified chunk has: two parameters, each copied once into a `const`,
-// a code-point peel that re-tests `> 0xFFFF` for the head and the tail, and the
-// two parameters reassigned from those copies -- the accumulation being the
-// second parameter. The emitter's own names (`$0`, `_s_0`) are matched
-// positionally, not by text; the peel and the accumulation are what pin this to
-// *this* loop, so csv-lib's other per-character loops (`$tokenize$`, `$run$`,
-// `$cut_run$`) are left alone. `lowered` is how many were replaced, and 0 --
-// bend compiling the loop well on its own -- is a result, not a failure.
-const ID = "([\\w$]+)";
-export const REVERSE_LOOP_SRC =
-  `function ${ID}\\(${ID},\\s*${ID}\\)\\s*\\{\\s*for\\s*\\(;;\\)\\s*\\{\\s*\\{\\s*` +
-  `const ${ID}\\s*=\\s*\\2;\\s*const ${ID}\\s*=\\s*\\3;\\s*` +
-  `if\\s*\\(\\4\\s*===\\s*""\\)\\s*\\{\\s*return \\5;\\s*\\}\\s*else\\s*\\{\\s*` +
-  `const ${ID}\\s*=\\s*\\(\\4\\.codePointAt\\(0\\)\\s*>\\s*0xFFFF\\s*\\?\\s*\\4\\.slice\\(0, 2\\)\\s*:\\s*\\4\\[0\\]\\);\\s*` +
-  `const ${ID}\\s*=\\s*\\(\\4\\.codePointAt\\(0\\)\\s*>\\s*0xFFFF\\s*\\?\\s*\\4\\.slice\\(2\\)\\s*:\\s*\\4\\.slice\\(1\\)\\);\\s*` +
-  `\\2\\s*=\\s*\\7;\\s*\\3\\s*=\\s*\\(\\6\\s*\\+\\s*\\5\\);\\s*continue;\\s*\\}\\s*\\}\\s*\\}\\s*\\}`;
-
-// How many loops of that shape are left in a module. The test that a built
-// module has none of them uses this, so the check is the matcher itself rather
-// than a second pattern that could drift from it.
-export function reverseLoops(module: string): number {
-  return [...module.matchAll(new RegExp(REVERSE_LOOP_SRC, "g"))].length;
-}
-
-export function lowerReverse(chunk: string): { chunk: string; lowered: number } {
-  let lowered = 0;
-  const out = chunk.replace(new RegExp(REVERSE_LOOP_SRC, "g"), (_m, f, s, acc) => {
-    lowered++;
-    return `function ${f}(${s},${acc}){return Array.from(${s}).reverse().join("")+${acc}}`;
-  });
-  return { chunk: out, lowered };
-}
-
 // bend's module is `export default { name: fn, ... }` and nothing else. A host
 // says `import { name } from "./dist/core.mjs"`, and the .d.mts declares those
 // names, so the object is bound to HELD and each def is re-exported from it.
@@ -366,7 +321,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
   const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
   const dts = declarations(modules(core), lib.filter(hostable));
-  const chunk = lowerReverse(bareTags(bundle(core), core)).chunk;
+  const chunk = bareTags(bundle(core), core);
   const names = lib.map((d) => d.name);
   const js = exportsOf(chunk, names);
 

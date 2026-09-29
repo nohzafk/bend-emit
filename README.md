@@ -87,18 +87,6 @@ tags a constructor of an imported module with that module's path
 every host that builds values by hand (bend-schema's codec) speak bare names. A
 module whose tags still carry a path is refused, not written.
 
-Base's `String.reverse` (and any def with the same loop) compiles to
-`acc = c + acc` per code point, and in JavaScriptCore every `+` is a rope node:
-a reversed string reaches the host as a chain of one-character nodes, all alive
-while it is. The loop is matched by its whole structure and replaced by
-`Array.from(s).reverse().join("") + acc`, the same function over code points,
-returning a flat string. In csv-lib, whose fields are built backwards and
-reversed, this is the difference at 10 MB of CSV between 1.2 s and 1.23 GB peak
-and 1.05 s and 0.83 GB (this Mac, `bun scale.ts` under `/usr/bin/time -l`). The
-tests check both that no such loop is left in a built module -- a bend release
-that changes its shape stops the lowering, and fails there -- and that the
-replacement answers what the loop did.
-
 ## What it leaves undeclared
 
 A def the module keeps but the `.d.mts` does not declare:

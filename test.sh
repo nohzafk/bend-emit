@@ -1,5 +1,5 @@
 #!/bin/sh
-# bend-emit's gate: the tool on six fixture cores.
+# bend-emit's gate: the tool on five fixture cores.
 #
 #   1. each fixture checks, and the tool builds it into a typed module
 #   2. the tests pass: the .d.mts text, the refusals, the values at run time
@@ -22,7 +22,7 @@ echo "== 1. the modules =="
 # beside the tests first -- gitignored: nothing here is published. dist/ is
 # emptied first so a stale .js from an earlier layout cannot pass for a .mjs.
 rm -rf test/dist
-for f in generics uses templated dependent dependent_user strings; do
+for f in generics uses templated dependent dependent_user; do
   tools/bend-check "test/$f.bend"
   bun src/emit.ts "test/$f.bend" test/dist > /dev/null
   echo "  $f: built"
