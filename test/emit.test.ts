@@ -92,8 +92,8 @@ describe("a core that imports another", () => {
   test("an imported constructor's tag is its bare name, whatever the compiler writes", () => {
     const js = readFileSync(new URL("./dist/uses.mjs", import.meta.url), "utf8");
     expect(js).not.toMatch(/"generics\.[A-Z]/);
-    // bend's .mjs output is not minified, so the tag is written with a space.
-    expect(js).toContain('$: "TooBig"');
+    // the tag is written with a space, either in a literal or in a constructor class.
+    expect(js).toMatch(/\$: "TooBig"|this\.\$ = "TooBig"/);
   });
 });
 

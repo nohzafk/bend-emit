@@ -30,6 +30,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { loopify, type Stayed } from "./loops";
+import { classify } from "./classes";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 // The name bend's `export default { ... }` is bound to, so the named exports
@@ -349,7 +350,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
   const looped = loopify(bareTags(bundle(core), core));
-  const chunk = looped.js;
+  const chunk = classify(looped.js);
   const names = lib.map((d) => d.name);
   const js = exportsOf(chunk, names);
 
