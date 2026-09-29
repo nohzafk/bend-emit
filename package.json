@@ -15,6 +15,7 @@
   },
   "files": [
     "src/emit.ts",
+    "src/loops.ts",
     "BEND_VERSION",
     "LICENSE",
     "README.md"

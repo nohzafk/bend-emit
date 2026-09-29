@@ -78,12 +78,25 @@ refused, naming the def -- a guess would be a hand-written type again. The def
 names read from the source must be exactly the names the compiled module
 exports, or nothing is written.
 
-Two changes are made to what bend writes.
+Three changes are made to what bend writes.
 
 Imported constructor tags are put back to bare names. bend tags a constructor
 of an imported module with that module's path (`"generics.TooBig"`), and the
 `.d.mts` and every host that builds values by hand (bend-schema's codec) speak bare names. A
 module whose tags still carry a path is refused, not written.
+
+The recursive defs that bend leaves as JavaScript recursion are turned into
+loops. Bend's own backend already emits `for(;;)` for a tail self-call; what it
+leaves recursive is the other shape -- a constructor whose **last field** carries
+the self-call, as in `TCon{kind(sep, c), tokens(sep, t)}`. Left alone, the
+JavaScript stack is what limits input size: measured on one core, a 10 MB file
+died at 32 KB and now reads it (1.5 s, 4.6 GB of heap). The pass pushes the
+per-step fields on a stack, rebinds the parameters and unwinds at the base case.
+It is deliberately conservative: a self-call that is not the last field, a field
+that calls something else recursively, a body holding a closure or a `$JMP`, or a
+def mixing the two shapes is left exactly as bend wrote it, and the build prints
+`still recursive: <name> (<why>)` for each, so a consumer can see whether their
+module can read large inputs.
 
 ## What it leaves undeclared
 
@@ -120,9 +133,9 @@ change — only the module path does.
 
 `bend` on PATH at exactly the version in `BEND_VERSION` (2.0.34), and bun to
 run this tool. Another version is refused before anything is compiled: the
-module is bend's own output, and this tool rewrites its tags and reads its
-exports, so a compiler it was never tested against could change either
-silently. A consumer pinned to an older bend pins an older bend-emit with it.
+module is bend's own output, and this tool rewrites its tags, reads its exports
+and rewrites the shape of its recursive defs, so a compiler it was never tested
+against could change any of those silently. A consumer pinned to an older bend pins an older bend-emit with it.
 
 ## Develop
 

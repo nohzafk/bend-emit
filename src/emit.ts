@@ -29,6 +29,7 @@
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { loopify, type Stayed } from "./loops";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 // The name bend's `export default { ... }` is bound to, so the named exports
@@ -323,7 +324,7 @@ export function exportsOf(chunk: string, names: string[]): string {
   ].join("\n");
 }
 
-export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string }> {
+export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string; stayed: Stayed[] }> {
   const core = resolve(corePath);
   const { defs } = readDecls(readFileSync(core, "utf8"));
   // bend exports every filled def that is not IO (main is the usual one),
@@ -345,7 +346,10 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
   const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
   const dts = declarations(modules(core), lib.filter(hostable));
-  const chunk = bareTags(bundle(core), core);
+  // Shape (B), a constructor whose last field is the self-call, becomes a loop
+  // (see loops.ts); what stays a JavaScript recursion is reported by main.
+  const looped = loopify(bareTags(bundle(core), core));
+  const chunk = looped.js;
   const names = lib.map((d) => d.name);
   const js = exportsOf(chunk, names);
 
@@ -370,7 +374,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed };
 }
 
 if (import.meta.main) {
@@ -382,6 +386,7 @@ if (import.meta.main) {
   try {
     const r = await build(core, out);
     console.log(`wrote ${r.js} and ${r.dts}`);
+    for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);
