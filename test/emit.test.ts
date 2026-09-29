@@ -6,6 +6,7 @@ import { declarations, readDecls } from "../src/emit";
 import { readdirSync, readFileSync } from "node:fs";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
 import { first_or_none, wrap } from "./dist/uses.mjs";
+import { code_of, double, kind } from "./dist/chars.mjs";
 
 function list<T>(xs: T[]): BendList<T> {
   return xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
@@ -47,7 +48,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "templated", "dependent", "dependent_user"];
+  const stems = ["generics", "uses", "templated", "dependent", "dependent_user", "chars"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -140,5 +141,24 @@ describe("generic data, and types that depend on a value", () => {
 
   test("a type parameter of a kind other than Data is refused, by name", () => {
     expect(() => readDecls("type F<T: Type> is Data:\n  F{x: T}\n")).toThrow("type F: a type parameter of kind Type");
+  });
+});
+
+describe("Char, and a type body with comments and blank lines", () => {
+  test("a Char crosses as a one-code-point string, both ways", () => {
+    expect(sig("def f(c: Char) -> Char:")).toBe("export declare function f(c: string): string;");
+    expect(double("é", "x")).toBe("ééx");
+    expect(double("😀", "")).toBe("😀😀");
+    expect(code_of({ $: "Other", c: "😀" })).toBe(0x1f600);
+  });
+
+  test("every constructor is read, past a comment and a blank line", () => {
+    const { datas } = readDecls(readFileSync(new URL("./chars.bend", import.meta.url), "utf8"));
+    expect(datas.find((d) => d.name === "Sort")!.ctors.map((c) => c.name)).toEqual(["Other", "Quote", "Sep"]);
+    const dts = readFileSync(new URL("./dist/chars.d.mts", import.meta.url), "utf8");
+    expect(dts).toContain('export type Sort = { $: "Other"; "c": string } | { $: "Quote" } | { $: "Sep" };');
+    expect(kind("\"")).toEqual({ $: "Quote" });
+    expect(kind(",")).toEqual({ $: "Sep" });
+    expect(kind("a")).toEqual({ $: "Other", c: "a" });
   });
 });

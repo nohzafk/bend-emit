@@ -74,7 +74,10 @@ unchanged. The module is otherwise bend's, byte for byte.
 
 The types are derived from the `.bend` source, never written by hand: the
 `type ... is Data:` blocks and the `def` headers are read, and each Bend type
-maps to the runtime's own encoding. A Bend type this tool does not know is
+maps to the runtime's own encoding: `Nat` is `bigint`, `U32` is `number`,
+`Bool` is `boolean`, `String` is `string`, and `Char` is a `string` of one code
+point (the runtime makes one with `String.fromCodePoint`). A type body may hold
+comments and blank lines, as bend allows. A Bend type this tool does not know is
 refused, naming the def -- a guess would be a hand-written type again. The def
 names read from the source must be exactly the names the compiled module
 exports, or nothing is written.

@@ -91,9 +91,19 @@ export function readDecls(src: string): { datas: Data[]; defs: Def[] } {
         if (k !== "Data") fail(`type ${m[1]}: a type parameter of kind ${k} (only Data is supported): ${line}`);
         return n;
       }) : [];
+      // The body is every indented line up to the next line that is not
+      // indented and not blank. A blank line or a comment inside it is bend's
+      // to allow, so it is skipped; stopping at a blank line would drop the
+      // constructors after it without a word.
       const ctors: Ctor[] = [];
-      for (; i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]); i++) {
-        const c = lines[i + 1].trim().match(/^([A-Za-z_]\w*)\{(.*)\}$/);
+      const body = (l: string) => /^\s+\S/.test(l) || /^\s*$/.test(l);
+      let end = i;
+      while (end + 1 < lines.length && body(lines[end + 1])) end++;
+      while (end > i && /^\s*$/.test(lines[end])) end--;
+      for (; i < end; i++) {
+        const text = lines[i + 1].trim();
+        if (text === "" || text.startsWith("#")) continue;
+        const c = text.match(/^([A-Za-z_]\w*)\{(.*)\}$/);
         if (!c) fail(`a constructor of ${m[1]} is not Name{field: Type, ...}: ${lines[i + 1]}`);
         ctors.push({ name: c[1], fields: splitTop(c[2]).map(nameType) });
       }
@@ -156,6 +166,9 @@ function tsType(t: string, datas: Map<string, string>, where: string): string {
   if (t === "Bool") return "boolean";
   if (t === "String") return "string";
   if (t === "U32") return "number";
+  // A Char is the one-code-point string the runtime makes it (char_new is
+  // String.fromCodePoint; Char.to_u32 is codePointAt(0)).
+  if (t === "Char") return "string";
   if (t === "Unit") return "BendUnit";
   // A function type, A -> B, split at its first top-level arrow. The runtime
   // passes a closure as a plain JS function of one argument.
