@@ -31,6 +31,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { loopify, type Stayed } from "./loops";
 import { classify } from "./classes";
+import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 // The name bend's `export default { ... }` is bound to, so the named exports
@@ -325,7 +326,7 @@ export function exportsOf(chunk: string, names: string[]): string {
   ].join("\n");
 }
 
-export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string; stayed: Stayed[] }> {
+export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[] }> {
   const core = resolve(corePath);
   const { defs } = readDecls(readFileSync(core, "utf8"));
   // bend exports every filled def that is not IO (main is the usual one),
@@ -350,7 +351,8 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
   const looped = loopify(bareTags(bundle(core), core));
-  const chunk = classify(looped.js);
+  const peeled = peel(looped.js);
+  const chunk = classify(peeled.js);
   const names = lib.map((d) => d.name);
   const js = exportsOf(chunk, names);
 
@@ -375,7 +377,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled };
 }
 
 if (import.meta.main) {
@@ -388,6 +390,7 @@ if (import.meta.main) {
     const r = await build(core, out);
     console.log(`wrote ${r.js} and ${r.dts}`);
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
+    for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);

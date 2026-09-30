@@ -20,7 +20,7 @@
 export interface Stayed { name: string; reason: string }
 
 // Index of the bracket closing the one opened at s[i], skipping JS strings; -1 if none.
-function close(s: string, i: number): number {
+export function close(s: string, i: number): number {
   let d = 0;
   for (let j = i; j < s.length; j++) {
     const ch = s[j];
@@ -35,7 +35,7 @@ function close(s: string, i: number): number {
 }
 
 // Split on commas outside brackets and strings.
-function splitTop(s: string): string[] {
+export function splitTop(s: string): string[] {
   const out: string[] = [];
   let d = 0, cur = "";
   for (let j = 0; j < s.length; j++) {
@@ -55,7 +55,7 @@ function splitTop(s: string): string[] {
 }
 
 // Occurrences of `name` as a whole identifier ($ and \w are identifier characters).
-const occ = (s: string, name: string, call = false) =>
+export const occ = (s: string, name: string, call = false) =>
   (s.match(new RegExp("(?<![\\w$])" + name.replace(/\$/g, "\\$") + (call ? "(?=\\()" : "(?![\\w$])"), "g")) ?? []).length;
 
 const UNWIND = [
