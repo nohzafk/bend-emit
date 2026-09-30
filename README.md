@@ -1,9 +1,19 @@
 # bend-emit
 
-**Turn a pure Bend core into an ordinary typed ES module.**
+**Turn a pure Bend core into a typed ES module.**
 
-Write your pure functions in [Bend](https://github.com/bendlang/bend); call
-them from TypeScript like any other typed import.
+Write your pure functions and proofs in [Bend](https://github.com/bendlang/bend),
+then call the generated functions from TypeScript. bend-emit generates named
+exports and TypeScript declarations, and applies conservative runtime
+optimizations to Bend's JavaScript output.
+
+## Quick Start
+
+Install **Bend 2.0.34** and **Bun**, with both `bend` and `bun` on PATH.
+The commands below also require Node.js and npm for `npx`.
+Installing this npm package does not install Bend or Bun.
+
+Save this as `core.bend`:
 
 ```bend
 import Base
@@ -12,139 +22,155 @@ def add(a: Nat, b: Nat) -> Nat:
   (a + b : Nat)
 ```
 
-```ts
-import { add } from "./dist/core.mjs";  // add(a: bigint, b: bigint): bigint
-add(2n, 3n);                            // 5n
+Build it:
+
+```sh
+npx --yes --package bend-emit@0.3.0 -- bend-emit core.bend dist
 ```
+
+Then import the generated module:
+
+```ts
+import { add } from "./dist/core.mjs";
+
+add(2n, 3n); // 5n; the generated signature uses bigint
+```
+
+For a project-local installation:
+
+```sh
+npm install --save-dev --save-exact bend-emit@0.3.0
+npx bend-emit core.bend dist
+```
+
+Bun users can install and run the same package:
+
+```sh
+bun add --dev --exact bend-emit@0.3.0
+bunx bend-emit core.bend dist
+```
+
+## Generated Files
 
 ```sh
 bend-emit <core.bend> <outdir>
 ```
 
-writes `<outdir>/<name>.mjs` and `<outdir>/<name>.d.mts`, so a host can write
-`import { slots } from "./dist/core.mjs"` and tsc knows every def's type.
+For `core.bend`, the command writes:
 
-The module is `.mjs` and the declaration `.d.mts` because that is the pair
-TypeScript resolves. A `.d.ts` is the declaration for a `.js` module: tsc
-resolving a `.mjs` tries `core.mts`, then `core.d.mts`, and stops (measured
-with `--traceResolution`) — it never looks for `core.d.ts`. And the module has
-to be `.mjs` in the first place, because Node decides a `.js` file's module
-system from the nearest `package.json` `"type"`, so the same file loads under
-`"type": "module"` and dies under `"type": "commonjs"` with
-`SyntaxError: Unexpected token 'export'`. Naming it `.mjs` also matches what
-bend itself emits (`bend x.bend -o x.mjs`). The gate loads a built module with
-node under both package modes, which is the check whose absence let the old
-`.js` name through.
+- `core.mjs`: an ES module with named exports and a default export.
+- `core.d.mts`: declarations for the supported public definitions and data types.
 
-## Why write it in Bend
+The `.mjs` extension makes the module load as ESM in both CommonJS and ESM
+packages. The matching `.d.mts` extension lets TypeScript resolve its types.
 
-Tests check the cases you thought of. [Bend](https://github.com/bendlang/bend)
-lets you state a law about a function -- "decoding an encoded value gives it
-back", "this check passes exactly when the value conforms" -- and prove it for
-every input; the proof is checked when the file is checked. Pure logic is where
-that pays off: parsers, validators, codecs, pricing and permission rules.
+Commit or distribute both files with your application or library. Consumers
+of these generated files do not need Bend, Bun, or bend-emit at runtime.
+They need a JavaScript runtime with ES-module support.
 
-bend-emit is the bridge that makes the proved code usable. You keep the core
-in Bend with its proofs, and your TypeScript application imports the very
-functions the proofs are about, with their types -- not a reimplementation
-that could drift from them.
+## Why Bend
+
+Bend lets you state laws about pure functions and prove them for all inputs
+covered by those laws. This is useful for parsers, validators, codecs, and
+other pure logic with precise requirements.
+
+bend-emit uses Bend's JavaScript backend rather than a second implementation
+of your core. Your TypeScript application calls the generated functions,
+with declarations derived from the Bend source.
+
+**The generated JavaScript is not independently proved.** Its behavior also
+depends on Bend's backend and bend-emit's transformations. Tests compare
+transformed output with Bend's output; they do not replace a proof of the
+compiler or this tool.
 
 For a worked example, see
-[bend-schema](https://github.com/nohzafk/bend-schema): a schema library whose
-checker is written and proved in Bend and shipped to TypeScript with
-bend-emit. It also lets one schema be reused on both sides: define it in
-TypeScript, generate its Bend form, use it in your own proved Bend functions,
-and call those back from TypeScript.
+[bend-schema](https://github.com/nohzafk/bend-schema), which builds a typed
+JavaScript interface to a schema checker written in Bend.
 
-## How it works
+## How It Works
 
-The JavaScript is bend's own. `bend <core.bend> -o <out>.mjs` is bend's
-ES-module target -- `bend --help` calls it "an ES module of its non-IO defs, for
-JS to import" -- and it is the command bend-emit runs.
+bend-emit runs `bend <core.bend> -o <out>.mjs`, then processes the emitted
+module and reads the source's data declarations and definition headers.
 
-What bend writes is `export default { name: fn, ... }`, and nothing else: bend
-emits no named exports. A host says `import { name } from "./dist/core.mjs"`, and
-the `.d.mts` declares those names, so bend-emit binds that object to a local name
-and re-exports each def from it. The default export stays bend's own object,
-unchanged. The module is otherwise bend's, byte for byte.
+Bend exports a default object. bend-emit adds named exports for its definitions
+while retaining the default export's interface. It checks that the source
+names and compiled export names agree before writing the output.
 
-The types are derived from the `.bend` source, never written by hand: the
-`type ... is Data:` blocks and the `def` headers are read, and each Bend type
-maps to the runtime's own encoding: `Nat` is `bigint`, `U32` is `number`,
-`Bool` is `boolean`, `String` is `string`, and `Char` is a `string` of one code
-point (the runtime makes one with `String.fromCodePoint`). A type body may hold
-comments and blank lines, as bend allows. A Bend type this tool does not know is
-refused, naming the def -- a guess would be a hand-written type again. The def
-names read from the source must be exactly the names the compiled module
-exports, or nothing is written.
+Supported types follow Bend's runtime representation:
 
-Three changes are made to what bend writes.
+| Bend | JavaScript / TypeScript |
+| --- | --- |
+| `Nat` | `bigint` |
+| `U32` | `number` |
+| `Bool` | `boolean` |
+| `String` | `string` |
+| `Char` | `string` containing one code point |
 
-Imported constructor tags are put back to bare names. bend tags a constructor
-of an imported module with that module's path (`"generics.TooBig"`), and the
-`.d.mts` and every host that builds values by hand (bend-schema's codec) speak bare names. A
-module whose tags still carry a path is refused, not written.
+The tool refuses an unsupported type in a signature it needs to declare,
+instead of guessing its representation.
 
-The recursive defs that bend leaves as JavaScript recursion are turned into
-loops. Bend's own backend already emits `for(;;)` for a tail self-call; what it
-leaves recursive is the other shape -- a constructor whose **last field** carries
-the self-call, as in `TCon{kind(sep, c), tokens(sep, t)}`. Left alone, the
-JavaScript stack is what limits input size: measured on one core, a 10 MB file
-died at 32 KB and now reads it (1.5 s, 4.6 GB of heap). The pass pushes the
-per-step fields on a stack, rebinds the parameters and unwinds at the base case.
-It is deliberately conservative: a self-call that is not the last field, a field
-that calls something else recursively, a body holding a closure or a `$JMP`, or a
-def mixing the two shapes is left exactly as bend wrote it, and the build prints
-`still recursive: <name> (<why>)` for each, so a consumer can see whether their
-module can read large inputs.
+### Runtime Transformations
 
-## What it leaves undeclared
+The generated module is not byte-for-byte identical to Bend's output.
+bend-emit applies these transformations:
 
-A def the module keeps but the `.d.mts` does not declare:
+- **Constructor tags:** remove imported-module prefixes so tags match the
+  bare names used by the generated declarations. Unresolved prefixed tags
+  cause a build failure.
+- **Recursive list construction:** turn eligible self-recursion in a
+  constructor's last field into a loop and a reconstruction stack.
+  Other recursive shapes remain unchanged and produce a
+  `still recursive: <name> (<why>)` diagnostic.
+- **Zero-field constructors:** reuse singleton values rather than allocating
+  a new object for each occurrence.
+- **String traversal:** replace eligible string-head/string-tail traversal
+  with an index into the original string. Code-point traversal still handles
+  surrogate pairs. Uses outside the recognized shapes remain unchanged and
+  produce a `string still sliced: ...` diagnostic.
 
-- one returning `IO(...)`: an effect, whose type only the host can vouch for
-- one with a template parameter (`~f`): bend's `.mjs` target does not export them
-- one returning `Data` or `Type`, or over a type one computes (a type computed
-  by a def, like `Meaning(s)`, is not a TypeScript type), or with an erased
-  parameter
+These passes recognize specific output shapes. They do not guarantee that
+all recursion becomes stack-safe or that every core uses less memory.
+Review the diagnostics and measure your own workload.
 
-They stay in the module and still run; only their signature is missing.
+### Undeclared Definitions
 
-## Install
+Some definitions have no generated TypeScript signature:
 
-Not on npm; install from GitHub as a dev dependency (it is a build tool):
+- Definitions returning `IO(...)`.
+- Definitions with template parameters such as `~f`.
+- Definitions returning `Data` or `Type`, using computed types, or carrying
+  erased parameters.
 
-```sh
-bun add -d github:nohzafk/bend-emit
-bunx bend-emit core.bend dist      # writes dist/core.mjs and dist/core.d.mts
-```
+Where Bend includes such a definition in its emitted module, bend-emit does
+not remove it. The absence of a declaration is not a supported typed API.
+Template definitions are not exported by Bend's ES-module target.
 
-Commit the generated `dist/` and import from it; your package then needs
-neither Bend nor bend-emit at run time.
+## Toolchain Requirements
 
-**Breaking change.** Up to 0.1.0 the tool wrote `dist/core.js` and
-`dist/core.d.ts`. From 0.2.0 it writes `dist/core.mjs` and `dist/core.d.mts`:
-an existing `import { slots } from "./dist/core.js"` becomes
-`"./dist/core.mjs"`, the `dist/core.d.ts` is gone (nothing resolved it), and
-rebuild to get the `.mjs` and the `.d.mts`. The types a host names do not
-change — only the module path does.
+The build tool requires Bun and **exactly Bend 2.0.34**, the version recorded
+in `BEND_VERSION`. Another Bend version is rejected before compilation.
 
-## Requirements
+The emitter reads and transforms compiler output, so a different compiler
+version could change the shapes it relies on. Pin bend-emit and use the Bend
+version required by that release.
 
-`bend` on PATH at exactly the version in `BEND_VERSION` (2.0.34), and bun to
-run this tool. Another version is refused before anything is compiled: the
-module is bend's own output, and this tool rewrites its tags, reads its exports
-and rewrites the shape of its recursive defs, so a compiler it was never tested
-against could change any of those silently. A consumer pinned to an older bend pins an older bend-emit with it.
+Since 0.2.0, output files use `.mjs` and `.d.mts`, not `.js` and `.d.ts`.
+Projects updating from 0.1.0 must rebuild and update their import paths.
 
-## Develop
+## Development
+
+From a checkout, install the development dependencies and run the gate:
 
 ```sh
+bun install --frozen-lockfile
 sh test.sh
 ```
 
-checks six fixture cores, builds each into a module, runs the tests (the
-`.d.mts` text, the refusals, the values at run time), typechecks a host
-written against the generated types, checks that a host's *wrong* call to a
-`.mjs` module is refused with TS2345 through the `.d.mts` beside it, and loads
-a built module with node under both `"type": "commonjs"` and `"type": "module"`.
+The gate builds fixture cores, checks runtime values and declarations,
+compares optimized output with Bend's output, and tests refusal paths.
+It also typechecks valid and invalid TypeScript calls and loads a generated
+module with Node in both CommonJS and ESM packages.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

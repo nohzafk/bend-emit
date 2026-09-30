@@ -11,13 +11,21 @@
     ".": "./src/emit.ts"
   },
   "bin": {
-    "bend-emit": "./src/emit.ts"
+    "bend-emit": "src/cli.js"
   },
   "files": [
-    "src/emit.ts",
-    "src/loops.ts",
+    "src/",
     "BEND_VERSION",
     "LICENSE",
     "README.md"
-  ]
+  ],
+  "description": "Generate typed ES modules from pure Bend cores.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nohzafk/bend-emit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nohzafk/bend-emit/issues"
+  },
+  "homepage": "https://github.com/nohzafk/bend-emit#readme"
 }
