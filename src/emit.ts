@@ -326,6 +326,20 @@ export function exportsOf(chunk: string, names: string[]): string {
   ].join("\n");
 }
 
+// The export-name prefixes of every .bend file a core reaches, transitively.
+// bend names an imported def by the import path as written in the file that
+// imports it, with "./" dropped: "../keys/core." from comp, "generics." for
+// "./generics.bend".
+export function importPrefixes(path: string, seen = new Set<string>(), out = new Set<string>()): Set<string> {
+  if (seen.has(path)) return out;
+  seen.add(path);
+  for (const m of readFileSync(path, "utf8").matchAll(/^import (\.{1,2}\/\S+)\.bend as \w+\s*$/gm)) {
+    out.add(m[1].replace(/^\.\//, "") + ".");
+    importPrefixes(resolve(dirname(path), m[1] + ".bend"), seen, out);
+  }
+  return out;
+}
+
 export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[] }> {
   const core = resolve(corePath);
   const { defs } = readDecls(readFileSync(core, "utf8"));
@@ -366,10 +380,12 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
 
   // The defs read from the source must be the module's exports, exactly.
   const mod = (await import(jsPath + "?t=" + Date.now())).default as Record<string, unknown>;
-  // The module also carries the defs of the .bend files the core imports,
-  // named by their import path ("../schema-lib/core.check", or
-  // "generics.first_big" for "./generics.bend"); those are theirs.
-  const imported = [...readFileSync(core, "utf8").matchAll(/^import (\.{1,2}\/\S+)\.bend as \w+\s*$/gm)].map((m) => m[1].replace(/^\.\//, "") + ".");
+  // The module also carries the defs of every .bend file the core reaches,
+  // directly or through another import; those are theirs. Each is named by
+  // its import path as written in the file that imports it
+  // ("../schema-lib/core.check", or "generics.first_big" for
+  // "./generics.bend"), so the prefixes are collected file by file.
+  const imported = [...importPrefixes(core)];
   const have = Object.keys(mod).filter((k) => !imported.some((p) => k.startsWith(p))).sort();
   const want = [...names].sort();
   if (have.join() !== want.join()) {

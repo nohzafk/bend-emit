@@ -48,7 +48,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "templated", "dependent", "dependent_user", "chars"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -94,6 +94,19 @@ describe("a core that imports another", () => {
     expect(js).not.toMatch(/"generics\.[A-Z]/);
     // the tag is written with a space, either in a literal or in a constructor class.
     expect(js).toMatch(/\$: "TooBig"|this\.\$ = "TooBig"/);
+  });
+});
+
+describe("a core that reaches a file only through another import", () => {
+  // reuses.bend imports uses.bend, which imports generics.bend: the module
+  // carries generics' defs under "generics.", the prefix uses.bend gives them.
+  test("its exports are its own defs, and they run", async () => {
+    const mod = await import("./dist/reuses.mjs");
+    const keys = Object.keys(mod.default);
+    expect(keys.filter((k) => !k.startsWith("uses.") && !k.startsWith("generics."))).toEqual(["rewrap"]);
+    expect(keys.some((k) => k.startsWith("generics."))).toBe(true);
+    expect(Object.keys(mod).sort()).toEqual(["default", "rewrap"]);
+    expect(mod.rewrap({ $: "Wrapped", err: { $: "Empty" } })).toEqual({ $: "Wrapped", err: { $: "Empty" } });
   });
 });
 
