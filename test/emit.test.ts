@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
 import { first_or_none, wrap } from "./dist/uses.mjs";
 import { code_of, double, kind } from "./dist/chars.mjs";
+import { empty, insert, lookup, value_identity, type BendMap } from "./dist/maps.mjs";
 
 function list<T>(xs: T[]): BendList<T> {
   return xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
@@ -28,6 +29,9 @@ describe("the .d.mts", () => {
     expect(sig("def f(e: Either<Nat, Bool>) -> List<Maybe<Nat>>:")).toBe(
       "export declare function f(e: BendEither<bigint, boolean>): BendList<BendMaybe<bigint>>;",
     );
+    expect(sig("def f(m: Map<&2, Nat>) -> Map<Nat>:")).toBe(
+      "export declare function f(m: BendMap<bigint>): BendMap<bigint>;",
+    );
   });
 
   test("a use with the wrong number of quantities or types is refused", () => {
@@ -35,10 +39,12 @@ describe("the .d.mts", () => {
     expect(() => sig("def f(r: Result<&2, Err, Nat>) -> Nat:")).toThrow("Result takes 2 type(s)");
     expect(() => sig("def f(r: Result<Nat>) -> Nat:")).toThrow("Result takes 2 type(s)");
     expect(() => sig("def f(l: List<Nat, &2>) -> Nat:")).toThrow("List takes 1 type(s)");
+    expect(() => sig("def f(m: Map<&2, &2, Nat>) -> Nat:")).toThrow("Map takes 1 type(s)");
+    expect(() => sig("def f(m: Map<Nat, Bool>) -> Nat:")).toThrow("Map takes 1 type(s)");
   });
 
   test("a generic the tool has no encoding for is refused, by name", () => {
-    expect(() => sig("def f(m: Map<&2, Nat>) -> Nat:")).toThrow("generic Bend type Map");
+    expect(() => sig("def f(m: Unsupported<&2, Nat>) -> Nat:")).toThrow("generic Bend type Unsupported");
   });
 });
 
@@ -48,7 +54,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -75,6 +81,38 @@ describe("at run time", () => {
     expect(side(true, 4n)).toEqual({ $: "Inl", value: 4n });
     expect(side(false, 4n)).toEqual({ $: "Inr", value: false });
     expect(unit(0n)).toEqual({ $: "Unit" });
+  });
+});
+
+describe("Map on the boundary", () => {
+  test("declares the native tree and recursive mapped values", () => {
+    const dts = readFileSync(new URL("./dist/maps.d.mts", import.meta.url), "utf8");
+    expect(dts).toContain('export type BendMap<T> = { $: "MTip" } | { $: "MLeaf"; key: string; val: T } | { $: "MNode"; pos: bigint; lo: BendMap<T>; hi: BendMap<T> };');
+    expect(dts).toContain('"children": BendMap<Value>');
+  });
+
+  test("empty, insert, overwrite, lookup, and bigint node positions", () => {
+    const zero = empty();
+    expect(zero).toEqual({ $: "MTip" });
+    const one = insert(zero, "a", 1n);
+    expect(one).toEqual({ $: "MLeaf", key: "a", val: 1n });
+    const two = insert(one, "b", 2n);
+    expect(two.$).toBe("MNode");
+    if (two.$ === "MNode") expect(typeof two.pos).toBe("bigint");
+    expect(lookup(two, "a", 99n)).toBe(1n);
+    expect(lookup(two, "b", 99n)).toBe(2n);
+    expect(lookup(two, "missing", 99n)).toBe(99n);
+    const updated = insert(two, "a", 3n);
+    expect(lookup(updated, "a", 99n)).toBe(3n);
+    expect(lookup(updated, "b", 99n)).toBe(2n);
+    expect(lookup(two, "a", 99n)).toBe(1n);
+  });
+
+  test("a host-built leaf and recursive map value round-trip", () => {
+    const input: BendMap<bigint> = { $: "MLeaf", key: "x", val: 7n };
+    expect(lookup(input, "x", 0n)).toBe(7n);
+    const value = { $: "Branch" as const, children: { $: "MLeaf" as const, key: "child", val: { $: "Leaf" as const, n: 42n } } };
+    expect(value_identity(value)).toEqual(value);
   });
 });
 

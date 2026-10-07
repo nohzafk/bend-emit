@@ -105,9 +105,9 @@ Supported types follow Bend's runtime representation:
 | `Bool` | `boolean` |
 | `String` | `string` |
 | `Char` | `string` containing one code point |
+| `Map<A>` | `BendMap<A>`: a tagged tree with `MTip`, `MLeaf`, and `MNode` |
 
-The tool refuses an unsupported type in a signature it needs to declare,
-instead of guessing its representation.
+The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, and `BendEither` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `bigint`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
 
 ### Runtime Transformations
 

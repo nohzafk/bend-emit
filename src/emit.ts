@@ -144,6 +144,7 @@ function topArrow(t: string): number {
 // `List<Nat>`, `List<&2, Nat>`, `Result<&2, &2, Err, Nat>`.
 const GENERICS: Record<string, { params: number; ts: string }> = {
   List: { params: 1, ts: "BendList" },
+  Map: { params: 1, ts: "BendMap" },
   Maybe: { params: 1, ts: "BendMaybe" },
   Result: { params: 2, ts: "BendResult" },
   Either: { params: 2, ts: "BendEither" },
@@ -153,6 +154,7 @@ const GENERICS: Record<string, { params: number; ts: string }> = {
 // fields by the names Base gives them.
 const PREAMBLE = [
   "export type BendList<T> = { $: \"Nil\" } | { $: \"Con\"; head: T; tail: BendList<T> };",
+  "export type BendMap<T> = { $: \"MTip\" } | { $: \"MLeaf\"; key: string; val: T } | { $: \"MNode\"; pos: bigint; lo: BendMap<T>; hi: BendMap<T> };",
   "export type BendMaybe<T> = { $: \"None\" } | { $: \"Some\"; value: T };",
   "export type BendResult<E, A> = { $: \"Fail\"; error: E } | { $: \"Done\"; value: A };",
   "export type BendEither<A, B> = { $: \"Inl\"; value: A } | { $: \"Inr\"; value: B };",
