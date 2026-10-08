@@ -67,9 +67,9 @@ export const occ = (s: string, name: string, call = false) =>
 const UNWIND = "be$unwind";
 const unwindHelper = (name: string) => [
   "// bend-emit: fold the pending continuation frames of a looped def, innermost first.",
-  `function ${name}(s, r) {`,
-  "  while (s.length > 0) r = s.pop()(r);",
-  "  return r;",
+  `function ${name}(be$s, be$r) {`,
+  "  while (be$s.length > 0) be$r = be$s.pop()(be$r);",
+  "  return be$r;",
   "}",
   "",
 ].join("\n");
