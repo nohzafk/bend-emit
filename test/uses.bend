@@ -12,8 +12,3 @@ def wrap(e: G.Err) -> Wrapped:
 
 def first_or_none(xs: List<&2, Nat>, +lim: Nat) -> Maybe<&2, G.Err>:
   G.first_big(xs, lim, 0n)
-
-# User string data equal to an imported constructor's tag with its module path:
-# it is data, and must come out byte for byte.
-def tag_text() -> String:
-  "generics.TooBig"

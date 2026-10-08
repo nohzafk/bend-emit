@@ -328,7 +328,7 @@ export function bareTags(chunk: string, root: string): string {
   // (`$: "x.C"`, `this.$ = "x.C"`), a `$` comparison (`.$ === "x.C"`) or a
   // switch label (`case "x.C":`). A string literal anywhere else is user data
   // and stays byte for byte, even when it reads like a tag.
-  const site = String.raw`(\$\??\s*(?::|=|[=!]==?)\s*|\bcase\s+)`;
+  const site = String.raw`((?<![\w$])\$\??\s*(?::|=|[=!]==?)\s*|\bcase\s+)`;
   const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
   let out = chunk;
   for (const [prefix, ctors] of prefixes) {
@@ -336,8 +336,21 @@ export function bareTags(chunk: string, root: string): string {
       out = out.replace(new RegExp(`${site}${esc(JSON.stringify(`${prefix}.${c}`))}`, "g"), (_, lead) => lead + JSON.stringify(c));
     }
   }
-  const left = [...out.matchAll(new RegExp(`${site}"([^"\\s]*[./][^"\\s]*)\\.([A-Z]\\w*)"`, "g"))].filter((m) => owner.has(m[3]));
-  if (left.length) fail(`constructor tags still carry a module path: ${[...new Set(left.map((m) => m[0].slice(m[1].length)))].join(", ")}`);
+  // Whatever is left is a tag in a form this rewrite does not know, or a user
+  // string with exactly the text of a tag; the two cannot be told apart, so
+  // neither is let through.
+  const left = new Set<string>();
+  for (const [prefix, ctors] of prefixes) {
+    for (const c of ctors) {
+      const lit = JSON.stringify(`${prefix}.${c}`);
+      if (out.includes(lit)) left.add(lit);
+    }
+  }
+  if (left.size) {
+    fail(
+      `the string literal ${[...left].join(", ")} is left in the module: it is either a constructor tag bend-emit could not rewrite, or a user string with exactly the text of an imported constructor's tag. Such a user string must be changed`,
+    );
+  }
   return out;
 }
 
