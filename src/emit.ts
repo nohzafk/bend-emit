@@ -30,7 +30,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { intrinsics, type Native, type Skipped } from "./intrinsics";
-import { loopify, type Stayed } from "./loops";
+import { loopify, occ, type Stayed } from "./loops";
 import { classify } from "./classes";
 import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -316,15 +316,27 @@ export function bareTags(chunk: string, root: string): string {
 // says `import { name } from "./dist/core.mjs"`, and the .d.mts declares those
 // names, so the object is bound to HELD and each def is re-exported from it.
 // What the module exports by default stays bend's own object, unchanged.
+//
+// A def's name is not declared in the module's scope: bend's runtime already
+// has top-level functions such as `run_lib` and `nat_host`, and a def of the
+// same name would redeclare it. Each def is bound to `HELD$<i>` instead (a
+// bend-emitted name always ends in `$`, so it cannot be one) and exported
+// under its own name.
 export function exportsOf(chunk: string, names: string[]): string {
   const found = chunk.match(/^export /gm) ?? [];
   if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
   if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");
+  const pub = names.filter((n) => IDENT.test(n));
+  const local = (i: number) => `${HELD}$${i}`;
+  for (const n of [HELD, ...pub.map((_, i) => local(i))]) {
+    if (occ(chunk, n)) fail(`bend's module already uses ${n}, which bend-emit binds its exports to`);
+  }
   const body = chunk.replace(/^export default \{$/m, `const ${HELD} = {`).trimEnd();
   return [
     body,
     `export default ${HELD};`,
-    ...names.filter((n) => IDENT.test(n)).map((n) => `export const ${n} = ${HELD}[${JSON.stringify(n)}];`),
+    ...pub.map((n, i) => `const ${local(i)} = ${HELD}[${JSON.stringify(n)}];`),
+    ...(pub.length ? [`export { ${pub.map((n, i) => `${local(i)} as ${n}`).join(", ")} };`] : []),
     "",
   ].join("\n");
 }

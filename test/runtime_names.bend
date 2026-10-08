@@ -1,0 +1,15 @@
+import Base
+
+# Defs named like top-level functions of bend's own runtime: the module must
+# still load, and each def is exported under its own name.
+def run_lib(n: Nat) -> Nat:
+  n
+
+def run_loop(n: Nat) -> Nat:
+  (n + 1n : Nat)
+
+def nat_host(b: Bool) -> Bool:
+  b
+
+def cmp_new(s: String) -> String:
+  s

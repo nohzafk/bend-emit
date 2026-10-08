@@ -54,7 +54,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -211,5 +211,13 @@ describe("Char, and a type body with comments and blank lines", () => {
     expect(kind("\"")).toEqual({ $: "Quote" });
     expect(kind(",")).toEqual({ $: "Sep" });
     expect(kind("a")).toEqual({ $: "Other", c: "a" });
+  });
+});
+
+describe("a def named like a function of bend's runtime", () => {
+  test("the module loads, and each def is exported under its own name", async () => {
+    const m = await import("./dist/runtime_names.mjs");
+    expect([m.run_lib(3n), m.run_loop(3n), m.nat_host(true), m.cmp_new("x")]).toEqual([3n, 4n, true, "x"]);
+    expect(Object.keys(m).sort()).toEqual(["cmp_new", "default", "nat_host", "run_lib", "run_loop"]);
   });
 });

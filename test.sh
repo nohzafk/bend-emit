@@ -29,7 +29,7 @@ echo "== 1. the modules =="
 # beside the tests first -- gitignored: nothing here is published. dist/ is
 # emptied first so a stale .js from an earlier layout cannot pass for a .mjs.
 rm -rf test/dist
-for f in generics uses reuses templated dependent dependent_user chars maps strings; do
+for f in generics uses reuses templated dependent dependent_user chars maps strings runtime_names; do
   tools/bend-check "test/$f.bend"
   bun src/emit.ts "test/$f.bend" test/dist > /dev/null
   echo "  $f: built"
