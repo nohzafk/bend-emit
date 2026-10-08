@@ -21,7 +21,7 @@
 export interface Native { name: string }
 export interface Skipped { name: string; reason: string }
 
-// The body bend 2.0.35 emits for Base's String.cmp, with blank-insensitive
+// The body bend 2.0.36 emits for Base's String.cmp, with blank-insensitive
 // comparison done by the caller.
 const CMP_EXPECTED = [
   'if (_a_0 === "") {',
