@@ -45,35 +45,30 @@ const CMP_EXPECTED = [
   "}",
 ].join("\n");
 
+// Native, and self-contained: no helper is added at the top level, where it
+// could collide with the emitted name of a def in the core.
 const CMP_NATIVE = [
   "function $String$cmp$(_a_0, _b_0) {",
-  "  const o = $str_order$(_a_0, _b_0);",
+  "  // bend-emit: Base's String.cmp, natively: lexicographic by code point.",
+  "  let o = 0;",
+  "  if (_a_0 !== _b_0) {",
+  "    for (let i = 0, j = 0;;) {",
+  "      if (i >= _a_0.length) { o = j >= _b_0.length ? 0 : -1; break; }",
+  "      if (j >= _b_0.length) { o = 1; break; }",
+  "      const x = _a_0.codePointAt(i), y = _b_0.codePointAt(j);",
+  "      if (x !== y) { o = x < y ? -1 : 1; break; }",
+  "      i += x > 0xFFFF ? 2 : 1;",
+  "      j += y > 0xFFFF ? 2 : 1;",
+  "    }",
+  "  }",
   '  return {$: "Tuple", "fst": {$: "Tuple", "fst": _a_0, "snd": _b_0}, "snd": (o < 0 ? {$: "LT"} : o > 0 ? {$: "GT"} : {$: "EQ"})};',
   "}",
-].join("\n");
-
-const ORDER = [
-  "// bend-emit: Base's String.cmp order, natively: lexicographic by code point (-1, 0, 1).",
-  "function $str_order$(a, b) {",
-  "  if (a === b) return 0;",
-  "  let i = 0, j = 0;",
-  "  for (;;) {",
-  "    if (i >= a.length) return j >= b.length ? 0 : -1;",
-  "    if (j >= b.length) return 1;",
-  "    const x = a.codePointAt(i), y = b.codePointAt(j);",
-  "    if (x !== y) return x < y ? -1 : 1;",
-  "    i += x > 0xFFFF ? 2 : 1;",
-  "    j += y > 0xFFFF ? 2 : 1;",
-  "  }",
-  "}",
-  "",
 ].join("\n");
 
 const norm = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
 
 export function intrinsics(js: string): { js: string; native: Native[]; skipped: Skipped[] } {
   const native: Native[] = [], skipped: Skipped[] = [];
-  let helper = false;
   const re = /^function (\$String\$cmp\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/m;
   const out = js.replace(re, (whole, name: string, ps: string, body: string) => {
     if (ps.replace(/\s/g, "") !== "_a_0,_b_0" || norm(body) !== CMP_EXPECTED) {
@@ -81,8 +76,7 @@ export function intrinsics(js: string): { js: string; native: Native[]; skipped:
       return whole;
     }
     native.push({ name });
-    helper = true;
     return CMP_NATIVE;
   });
-  return { js: helper ? out.replace(/^function /m, () => ORDER + "function ") : out, native, skipped };
+  return { js: out, native, skipped };
 }

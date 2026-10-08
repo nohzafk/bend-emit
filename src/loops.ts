@@ -63,14 +63,24 @@ export function splitTop(s: string): string[] {
 export const occ = (s: string, name: string, call = false) =>
   (s.match(new RegExp("(?<![\\w$])" + name.replace(/\$/g, "\\$") + (call ? "(?=\\()" : "(?![\\w$])"), "g")) ?? []).length;
 
-const UNWIND = [
+// The helper that folds a looped def's pending frames, innermost first. Its
+// name must not be one the module already uses: `$unwind$` is also what bend
+// emits for a def named `unwind`, so a fresh suffix is taken when it is.
+const unwindHelper = (name: string) => [
   "// bend-emit: fold the pending continuation frames of a looped def, innermost first.",
-  "function $unwind$(s, r) {",
+  `function ${name}(s, r) {`,
   "  while (s.length > 0) r = s.pop()(r);",
   "  return r;",
   "}",
   "",
 ].join("\n");
+
+function freshName(js: string, base: string): string {
+  for (let k = 0; ; k++) {
+    const n = k === 0 ? base : `${base}${k}$`;
+    if (!occ(js, n)) return n;
+  }
+}
 
 class Unsupported extends Error {}
 const no = (why: string): never => { throw new Unsupported(why); };
@@ -225,7 +235,7 @@ function peel(e: string, name: string, c: Site): string {
 }
 
 // The rewritten body, or the reason it cannot be.
-function rewrite(name: string, params: string[], body: string): string | string[] {
+function rewrite(name: string, params: string[], body: string, unwind: string): string | string[] {
   const self = name + "(";
   let inner = body;
   const t = body.trim();
@@ -258,7 +268,7 @@ function rewrite(name: string, params: string[], body: string): string | string[
       const line = lines[i];
       const r = line.match(retRe);
       if (!occ(line, name)) {
-        if (r) out.push(`${r[1]}return $unwind$($stk, ${r[2]});`);
+        if (r) out.push(`${r[1]}return ${unwind}($stk, ${r[2]});`);
         else if (/^\s*return\b/.test(line)) return "multi-line return";
         else out.push(line);
         continue;
@@ -300,10 +310,11 @@ function rewrite(name: string, params: string[], body: string): string | string[
 export function loopify(js: string): { js: string; stayed: Stayed[] } {
   const stayed: Stayed[] = [];
   let helper = false;
+  const unwind = freshName(js, "$unwind$");
   const out = js.replace(/^function (\$[\w$]*\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm, (whole, name: string, ps: string, body: string) => {
     if (!occ(body, name)) return whole; // not recursive
     const params = ps.split(",").map((p) => p.trim()).filter(Boolean);
-    const r = rewrite(name, params, body);
+    const r = rewrite(name, params, body, unwind);
     if (typeof r === "string") {
       stayed.push({ name, reason: r });
       return whole;
@@ -311,5 +322,5 @@ export function loopify(js: string): { js: string; stayed: Stayed[] } {
     helper = true;
     return `function ${name}(${ps}) {\n  const $stk = [];\n  for (;;) {\n${r[0]}\n  }\n}`;
   });
-  return { js: helper ? out.replace(/^function /m, () => UNWIND + "function ") : out, stayed };
+  return { js: helper ? out.replace(/^function /m, () => unwindHelper(unwind) + "function ") : out, stayed };
 }
