@@ -218,7 +218,7 @@ describe("a def named like a function of bend's runtime", () => {
   test("the module loads, and each def is exported under its own name", async () => {
     const m = await import("./dist/runtime_names.mjs");
     expect([m.run_lib(3n), m.run_loop(3n), m.nat_host(true), m.cmp_new("x")]).toEqual([3n, 4n, true, "x"]);
-    expect(Object.keys(m).sort()).toEqual(["cmp_new", "default", "message", "nat_host", "run_lib", "run_loop"]);
+    expect(Object.keys(m).sort()).toEqual(["cmp_new", "core", "default", "message", "nat_host", "run_lib", "run_loop"]);
   });
   test("text spelling the export binding names is data, not a collision", async () => {
     const m = await import("./dist/runtime_names.mjs");

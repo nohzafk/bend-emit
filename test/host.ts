@@ -41,3 +41,5 @@ export const wrongNumber: BendResult<Err, bigint> = { $: "Done", value: 3 };
 // reserved word is reached through the default export only.
 import names, { message, run_lib } from "./dist/runtime_names.mjs";
 export const runtimeNamed: [bigint, string, bigint] = [run_lib(1n), message(), names.class(2n)];
+import { core } from "./dist/runtime_names.mjs";
+export const namedCore: bigint = core(3n);

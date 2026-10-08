@@ -22,3 +22,8 @@ def class(n: Nat) -> Nat:
 # collision.
 def message() -> String:
   "$bend_emit $bend_emit$0"
+
+# The name the declaration file gives its default object, when nothing else
+# uses it.
+def core(n: Nat) -> Nat:
+  n

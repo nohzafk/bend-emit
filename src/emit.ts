@@ -261,7 +261,11 @@ export function declarations(mods: Module[], defs: Def[]): string {
     if (bindable(f.name)) out.push(`export declare function ${f.name}${sig};`);
     members.push(`  ${JSON.stringify(f.name)}${sig};`);
   }
-  out.push("", "declare const core: {", ...members, "};", "export default core;", "");
+  // The default object's local name must not be a def's: a def named `core`
+  // is a named export, and a local `core` beside it does not typecheck.
+  let held = "core";
+  for (let k = 1; out.some((l) => l.includes(held)) || members.some((l) => l.includes(held)); k++) held = `${HELD}${k}`;
+  out.push("", `declare const ${held}: {`, ...members, "};", `export default ${held};`, "");
   return out.join("\n");
 }
 
