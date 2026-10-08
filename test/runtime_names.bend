@@ -27,3 +27,8 @@ def message() -> String:
 # uses it.
 def core(n: Nat) -> Nat:
   n
+
+# Parameter names that are reserved words: bend accepts them, and the
+# declaration writes them as be$<name>.
+def keywords(class: Nat, default: Nat) -> Nat:
+  (class + default : Nat)

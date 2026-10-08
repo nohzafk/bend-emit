@@ -218,7 +218,7 @@ describe("a def named like a function of bend's runtime", () => {
   test("the module loads, and each def is exported under its own name", async () => {
     const m = await import("./dist/runtime_names.mjs");
     expect([m.run_lib(3n), m.run_loop(3n), m.nat_host(true), m.cmp_new("x")]).toEqual([3n, 4n, true, "x"]);
-    expect(Object.keys(m).sort()).toEqual(["cmp_new", "core", "default", "message", "nat_host", "run_lib", "run_loop"]);
+    expect(Object.keys(m).sort()).toEqual(["cmp_new", "core", "default", "keywords", "message", "nat_host", "run_lib", "run_loop"]);
   });
   test("text spelling the export binding names is data, not a collision", async () => {
     const m = await import("./dist/runtime_names.mjs");
@@ -231,6 +231,20 @@ describe("a def named like a function of bend's runtime", () => {
     expect(dts).not.toContain("function class");
     expect(dts).toContain('"class"(n: bigint): bigint;');
   });
+  test("the default object is be$default, beside a def named core", async () => {
+    const dts = await Bun.file(new URL("./dist/runtime_names.d.mts", import.meta.url)).text();
+    expect(dts).toContain("export declare function core(n: bigint): bigint;");
+    expect(dts).toContain("declare const be$default: {");
+    expect(dts).toContain("export default be$default;");
+    expect(dts).not.toContain("$bend_emit");
+  });
+  test("a parameter that is a reserved word is written be$<name>; ordinary ones stay", async () => {
+    const dts = await Bun.file(new URL("./dist/runtime_names.d.mts", import.meta.url)).text();
+    expect(dts).toContain("export declare function keywords(be$class: bigint, be$default: bigint): bigint;");
+    expect(dts).toContain("export declare function core(n: bigint): bigint;");
+    const m = await import("./dist/runtime_names.mjs");
+    expect(m.keywords(1n, 2n)).toBe(3n);
+  });
 });
 
 describe("a data type named like a type of the preamble", () => {
@@ -239,5 +253,22 @@ describe("a data type named like a type of the preamble", () => {
     const { datas } = readDecls(src);
     const mod = { prefix: "", datas, scope: new Map(datas.map((d) => [d.name, d.name])) };
     expect(() => declarations([mod], [])).toThrow("type BendList: the name of a type bend-emit declares for Base");
+  });
+});
+
+describe("an imported data type whose TypeScript name is another type's", () => {
+  const mod = (prefix: string, names: string[]) => {
+    const { datas } = readDecls(names.map((n) => `type ${n} is Data:\n  Own{}\n`).join("\n"));
+    return { prefix, datas, scope: new Map(datas.map((d) => [d.name, prefix + d.name])) };
+  };
+  test("a local type and an import's type are refused, naming both", () => {
+    expect(() => declarations([mod("", ["G_Err"]), mod("G_", ["Err"])], [])).toThrow("two types would both be written G_Err: type G_Err of the core and type Err imported as G");
+    expect(() => declarations([mod("", ["G_Err"]), mod("G_", ["Err"])], [])).toThrow("type G_Err");
+  });
+  test("two imports' types are refused", () => {
+    expect(() => declarations([mod("", []), mod("a_b_", ["T"]), mod("a_", ["b_T"])], [])).toThrow("two types would both be written a_b_T: type T imported as a_b and type b_T imported as a");
+  });
+  test("distinct names pass", () => {
+    expect(declarations([mod("", ["A"]), mod("G_", ["Err"])], [])).toContain("export type G_Err");
   });
 });

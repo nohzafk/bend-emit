@@ -35,10 +35,6 @@ import { classify } from "./classes";
 import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
-// The name bend's `export default { ... }` is bound to, so the named exports
-// below have something to read. bend writes no such name of its own.
-const HELD = "$bend_emit";
-
 interface Ctor { name: string; fields: [string, string][] }
 interface Data { name: string; tparams: string[]; ctors: Ctor[] }
 interface Def { name: string; params: [string, string][]; ret: string; erased: boolean }
@@ -242,11 +238,18 @@ export function modules(path: string, prefix = "", seen = new Set<string>()): Mo
 
 export function declarations(mods: Module[], defs: Def[]): string {
   const out: string[] = [...PREAMBLE, ""];
+  const written = new Map<string, string>();
   for (const { prefix, datas, scope } of mods) {
     for (const d of datas) {
       const name = prefix + d.name;
       if (!IDENT.test(name)) fail(`type ${d.name}: not a TypeScript identifier`);
       if (PREAMBLE_TYPES.has(name)) fail(`type ${d.name}: the name of a type bend-emit declares for Base (${[...PREAMBLE_TYPES].join(", ")}); rename it`);
+      // An import is written <alias>_<Type>, which a local type or another
+      // import can spell too; two types of one name do not typecheck.
+      const source = prefix === "" ? `type ${d.name} of the core` : `type ${d.name} imported as ${prefix.slice(0, -1)}`;
+      const prior = written.get(name);
+      if (prior !== undefined) fail(`two types would both be written ${name}: ${prior} and ${source}; rename one`);
+      written.set(name, source);
       const inner = new Map(scope);
       for (const p of d.tparams) inner.set("$param:" + p, p);
       const shape = (c: Ctor) => "{ $: " + JSON.stringify(c.name)
@@ -260,15 +263,15 @@ export function declarations(mods: Module[], defs: Def[]): string {
   out.push("");
   const members: string[] = [];
   for (const f of defs) {
-    const sig = "(" + f.params.map(([n, t]) => `${n}: ${tsType(t, main, `def ${f.name}`)}`).join(", ")
+    // A parameter name is not part of the type contract; one TypeScript cannot
+    // bind is written be$<name>, a prefix no Bend name can spell.
+    const sig = "(" + f.params.map(([n, t]) => `${bindable(n) ? n : "be$" + n}: ${tsType(t, main, `def ${f.name}`)}`).join(", ")
       + "): " + tsType(f.ret, main, `def ${f.name}`);
     if (bindable(f.name)) out.push(`export declare function ${f.name}${sig};`);
     members.push(`  ${JSON.stringify(f.name)}${sig};`);
   }
-  // The default object's local name must not be a def's: a def named `core`
-  // is a named export, and a local `core` beside it does not typecheck.
-  let held = "core";
-  for (let k = 1; out.some((l) => l.includes(held)) || members.some((l) => l.includes(held)); k++) held = `${HELD}${k}`;
+  // bend-emit's own names start with be$, which no def name can spell here.
+  const held = "be$default";
   out.push("", `declare const ${held}: {`, ...members, "};", `export default ${held};`, "");
   return out.join("\n");
 }
