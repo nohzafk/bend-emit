@@ -324,12 +324,20 @@ export function bareTags(chunk: string, root: string): string {
     for (const m of src.matchAll(/^import (\.{1,2}\/\S+\.bend) as [A-Za-z_]\w*\s*$/gm)) walk(resolve(dirname(file), m[1]), false);
   };
   walk(root, true);
+  // Only a constructor tag is rewritten: bend writes one as a `$` key
+  // (`$: "x.C"`, `this.$ = "x.C"`), a `$` comparison (`.$ === "x.C"`) or a
+  // switch label (`case "x.C":`). A string literal anywhere else is user data
+  // and stays byte for byte, even when it reads like a tag.
+  const site = String.raw`(\$\??\s*(?::|=|[=!]==?)\s*|\bcase\s+)`;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
   let out = chunk;
   for (const [prefix, ctors] of prefixes) {
-    for (const c of ctors) out = out.split(JSON.stringify(`${prefix}.${c}`)).join(JSON.stringify(c));
+    for (const c of ctors) {
+      out = out.replace(new RegExp(`${site}${esc(JSON.stringify(`${prefix}.${c}`))}`, "g"), (_, lead) => lead + JSON.stringify(c));
+    }
   }
-  const left = [...out.matchAll(/"([^"\s]*[./][^"\s]*)\.([A-Z]\w*)"/g)].filter((m) => owner.has(m[2]));
-  if (left.length) fail(`constructor tags still carry a module path: ${[...new Set(left.map((m) => m[0]))].join(", ")}`);
+  const left = [...out.matchAll(new RegExp(`${site}"([^"\\s]*[./][^"\\s]*)\\.([A-Z]\\w*)"`, "g"))].filter((m) => owner.has(m[3]));
+  if (left.length) fail(`constructor tags still carry a module path: ${[...new Set(left.map((m) => m[0].slice(m[1].length)))].join(", ")}`);
   return out;
 }
 

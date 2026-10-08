@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { declarations, readDecls } from "../src/emit";
 import { readdirSync, readFileSync } from "node:fs";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
-import { first_or_none, wrap } from "./dist/uses.mjs";
+import { first_or_none, tag_text, wrap } from "./dist/uses.mjs";
 import { code_of, double, kind } from "./dist/chars.mjs";
 import { empty, insert, lookup, value_identity, type BendMap } from "./dist/maps.mjs";
 
@@ -127,9 +127,12 @@ describe("a core that imports another", () => {
     expect(first_or_none(list([1n, 9n]), 5n)).toEqual({ $: "Some", value: { $: "TooBig", index: 1n, got: 9n } });
     expect(wrap({ $: "Empty" })).toEqual({ $: "Wrapped", err: { $: "Empty" } });
   });
+  test("a string that reads like a module-path tag is user data, left as written", () => {
+    expect(tag_text()).toBe("generics.TooBig");
+  });
   test("an imported constructor's tag is its bare name, whatever the compiler writes", () => {
     const js = readFileSync(new URL("./dist/uses.mjs", import.meta.url), "utf8");
-    expect(js).not.toMatch(/"generics\.[A-Z]/);
+    expect(js).not.toMatch(/(\$\s*[:=]|[=!]==|case)\s*"generics\.[A-Z]/);
     // the tag is written with a space, either in a literal or in a constructor class.
     expect(js).toMatch(/\$: "TooBig"|this\.\$ = "TooBig"/);
   });
