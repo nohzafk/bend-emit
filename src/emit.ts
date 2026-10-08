@@ -161,6 +161,9 @@ const PREAMBLE = [
   "export type BendEither<A, B> = { $: \"Inl\"; value: A } | { $: \"Inr\"; value: B };",
   "export type BendUnit = { $: \"Unit\" };",
 ];
+// The names the preamble declares. They are public (a host imports them), so a
+// data type of the same name is refused rather than renamed.
+const PREAMBLE_TYPES = new Set(PREAMBLE.map((l) => l.match(/^export type (\w+)/)![1]));
 
 // A Bend type as the runtime encodes it. `scope` maps a data type's name, as
 // the module that uses it writes it, to its TypeScript name.
@@ -243,6 +246,7 @@ export function declarations(mods: Module[], defs: Def[]): string {
     for (const d of datas) {
       const name = prefix + d.name;
       if (!IDENT.test(name)) fail(`type ${d.name}: not a TypeScript identifier`);
+      if (PREAMBLE_TYPES.has(name)) fail(`type ${d.name}: the name of a type bend-emit declares for Base (${[...PREAMBLE_TYPES].join(", ")}); rename it`);
       const inner = new Map(scope);
       for (const p of d.tparams) inner.set("$param:" + p, p);
       const shape = (c: Ctor) => "{ $: " + JSON.stringify(c.name)

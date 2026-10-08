@@ -232,3 +232,12 @@ describe("a def named like a function of bend's runtime", () => {
     expect(dts).toContain('"class"(n: bigint): bigint;');
   });
 });
+
+describe("a data type named like a type of the preamble", () => {
+  test("is refused, with the reserved names", () => {
+    const src = "import Base\n\ntype BendList is Data:\n  Own{}\n\ndef identity(x: BendList) -> BendList:\n  x\n";
+    const { datas } = readDecls(src);
+    const mod = { prefix: "", datas, scope: new Map(datas.map((d) => [d.name, d.name])) };
+    expect(() => declarations([mod], [])).toThrow("type BendList: the name of a type bend-emit declares for Base");
+  });
+});
