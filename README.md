@@ -117,6 +117,14 @@ bend-emit applies these transformations:
 - **Constructor tags:** remove imported-module prefixes so tags match the
   bare names used by the generated declarations. Unresolved prefixed tags
   cause a build failure.
+- **Native string comparison:** Base's `String.cmp`, which every
+  `String.eq`, `String.order` and `String.is_*` goes through, walks two
+  strings through a pair of defs that call each other, one character at a
+  time, slicing a new tail per step. It is replaced by a native function that
+  returns the same value, ordering by code point (a Bend `Char`), not by
+  UTF-16 unit as JavaScript's `<` does. The replacement happens only when the
+  def is exactly the text this bend version emits; otherwise it is left as is
+  and reported as `not made native: <name> (<why>)`.
 - **Recursive list traversal:** turn recursion on the tail of a list into a
   loop. In a `return` expression with self-calls, the self-call evaluated
   last (the "hole") is replaced by a loop step: what is evaluated before it

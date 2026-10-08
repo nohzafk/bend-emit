@@ -54,7 +54,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
