@@ -288,7 +288,7 @@ function checkBend(): void {
 }
 
 // Compile the core with bend's ES-module target and return what it wrote.
-function bundle(core: string): string {
+export function bundle(core: string): string {
   checkBend();
   const tmp = mkdtempSync(join(tmpdir(), "bend-lib-"));
   try {
@@ -332,23 +332,21 @@ export function bareTags(chunk: string, root: string): string {
 
 // bend's module is `export default { name: fn, ... }` and nothing else. A host
 // says `import { name } from "./dist/core.mjs"`, and the .d.mts declares those
-// names, so the object is bound to HELD and each def is re-exported from it.
+// names, so the object is bound to `be$default` and each def is re-exported from it.
 // What the module exports by default stays bend's own object, unchanged.
 //
 // A def's name is not declared in the module's scope: bend's runtime already
 // has top-level functions such as `run_lib` and `nat_host`, and a def of the
-// same name would redeclare it. The object and each def are bound to names
-// built on a base the module's text does not contain anywhere (`$bend_emit`,
-// or `$bend_emit<k>` when it does), and each def is exported under its own
-// name. Avoiding the text, strings included, can only skip a usable base.
+// same name would redeclare it. The object is bound to `be$default` and each
+// def to `be$<i>`; bend never writes a name starting with `be$`, so they cannot
+// collide. Each def is exported under its own name.
 export function exportsOf(chunk: string, names: string[]): string {
   const found = chunk.match(/^export /gm) ?? [];
   if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
   if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");
-  let held = HELD;
-  for (let k = 1; chunk.includes(held); k++) held = HELD + k;
+  const held = "be$default";
   const pub = names.filter(bindable);
-  const local = (i: number) => `${held}$${i}`;
+  const local = (i: number) => `be$${i}`;
   const body = chunk.replace(/^export default \{$/m, `const ${held} = {`).trimEnd();
   return [
     body,

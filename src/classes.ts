@@ -47,14 +47,14 @@ export function classify(js: string): string {
       const fs = parts.slice(1).map((p) => p.match(/^("[^"]+"|[A-Za-z_$][\w$]*): ([\s\S]*)$/));
       if (!tag || fs.some((m) => !m) || /[^\w$"]/.test(tag[1].replace(/"/g, ""))) { out += s.slice(i, k + 1); i = k + 1; continue; }
       const names = fs.map((m) => m![1].replace(/"/g, ""));
-      const cname = `$C$${tag[1]}${names.map((n) => "$" + n).join("")}`;
+      const cname = `be$C$${tag[1]}${names.map((n) => "$" + n).join("")}`;
       if (!classes.has(cname)) {
-        const ps = names.map((_, j) => `a${j}`);
-        classes.set(cname, `class ${cname} { constructor(${ps.join(", ")}) { this.$ = "${tag[1]}";${names.map((n, j) => ` this.${n} = a${j};`).join("")} } }`);
+        const ps = names.map((_, j) => `be$a${j}`);
+        classes.set(cname, `class ${cname} { constructor(${ps.join(", ")}) { this.$ = "${tag[1]}";${names.map((n, j) => ` this.${n} = be$a${j};`).join("")} } }`);
       }
       if (names.length === 0) {
-        if (!classes.has("$N$" + tag[1])) classes.set("$N$" + tag[1], `const $N$${tag[1]} = new ${cname}();`);
-        out += s.slice(i, k) + `$N$${tag[1]}`; i = e + 1; continue;
+        if (!classes.has("be$N$" + tag[1])) classes.set("be$N$" + tag[1], `const be$N$${tag[1]} = new ${cname}();`);
+        out += s.slice(i, k) + `be$N$${tag[1]}`; i = e + 1; continue;
       }
       out += s.slice(i, k) + `new ${cname}(${fs.map((m) => conv(m![2])).join(", ")})`;
       i = e + 1;

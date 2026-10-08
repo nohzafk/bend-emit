@@ -63,9 +63,8 @@ export function splitTop(s: string): string[] {
 export const occ = (s: string, name: string, call = false) =>
   (s.match(new RegExp("(?<![\\w$])" + name.replace(/\$/g, "\\$") + (call ? "(?=\\()" : "(?![\\w$])"), "g")) ?? []).length;
 
-// The helper that folds a looped def's pending frames, innermost first. Its
-// name must not be one the module already uses: `$unwind$` is also what bend
-// emits for a def named `unwind`, so a fresh suffix is taken when it is.
+// The helper that folds a looped def's pending frames, innermost first.
+const UNWIND = "be$unwind";
 const unwindHelper = (name: string) => [
   "// bend-emit: fold the pending continuation frames of a looped def, innermost first.",
   `function ${name}(s, r) {`,
@@ -74,13 +73,6 @@ const unwindHelper = (name: string) => [
   "}",
   "",
 ].join("\n");
-
-function freshName(js: string, base: string): string {
-  for (let k = 0; ; k++) {
-    const n = k === 0 ? base : `${base}${k}$`;
-    if (!occ(js, n)) return n;
-  }
-}
 
 class Unsupported extends Error {}
 const no = (why: string): never => { throw new Unsupported(why); };
@@ -166,7 +158,7 @@ function parseOperand(t: string): { prefix: string; elems: string[] } {
 interface Site { pre: string[]; n: number; hole: string }
 
 // The expression `e` with its LAST-evaluated self-call (the hole) replaced by
-// `$r`. Everything evaluated before the hole is hoisted, in order, into
+// `be$r`. Everything evaluated before the hole is hoisted, in order, into
 // `c.pre` as consts; what is evaluated after it stays in the returned text.
 function peel(e: string, name: string, c: Site): string {
   const self = name + "(";
@@ -175,14 +167,14 @@ function peel(e: string, name: string, c: Site): string {
   const hoist = (raw: string) => {
     const core = raw.trim();
     if (!core.includes("(")) return raw;
-    const t = "$t" + c.n++;
+    const t = "be$t" + c.n++;
     c.pre.push(`const ${t} = ${core};`);
     return lead(raw) + t + trail(raw);
   };
   const keep = (raw: string, f: (x: string) => string) => lead(raw) + f(raw.trim()) + trail(raw);
   e = e.trim();
   if (e[0] === "(" && close(e, 0) === e.length - 1) return "(" + peel(e.slice(1, -1), name, c) + ")";
-  if (e.startsWith(self) && close(e, self.length - 1) === e.length - 1) { c.hole = e; return "$r"; }
+  if (e.startsWith(self) && close(e, self.length - 1) === e.length - 1) { c.hole = e; return "be$r"; }
 
   const { operands, seps } = splitOps(e);
   if (operands.length > 1) {
@@ -203,7 +195,7 @@ function peel(e: string, name: string, c: Site): string {
   if (j < 0) return no("no self-call");
   if (elems[0] === name && elems.length > 1 && elems[1][0] === "(" && j <= 1) {
     c.hole = name + elems[1];
-    return prefix + "$r" + elems.slice(2).join("");
+    return prefix + "be$r" + elems.slice(2).join("");
   }
   const before = prefix + elems.slice(0, j).join("");
   if (has(before) || before.includes("(")) no("a call is evaluated before the self-call");
@@ -254,11 +246,11 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
   const site = (ind: string, c: Site, frame: string | null) => {
     const args = splitTop(c.hole.slice(self.length, -1));
     if (args.length !== params.length) return no("argument count differs from parameters");
-    const set = args.map((a, i) => (a === params[i] ? "" : `const $a${i} = ${a}; `)).join("");
-    const asg = args.map((a, i) => (a === params[i] ? "" : `${params[i]} = $a${i}; `)).join("");
+    const set = args.map((a, i) => (a === params[i] ? "" : `const be$a${i} = ${a}; `)).join("");
+    const asg = args.map((a, i) => (a === params[i] ? "" : `${params[i]} = be$a${i}; `)).join("");
     out.push(`${ind}{`);
     for (const p of c.pre) out.push(`${ind}  ${p}`);
-    if (frame !== null) out.push(`${ind}  $stk.push(${shadow(frame, frame)});`);
+    if (frame !== null) out.push(`${ind}  be$stk.push(${shadow(frame, frame)});`);
     out.push(`${ind}  ${set}${asg}continue;`);
     out.push(`${ind}}`);
     sites++;
@@ -268,7 +260,7 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
       const line = lines[i];
       const r = line.match(retRe);
       if (!occ(line, name)) {
-        if (r) out.push(`${r[1]}return ${unwind}($stk, ${r[2]});`);
+        if (r) out.push(`${r[1]}return ${unwind}(be$stk, ${r[2]});`);
         else if (/^\s*return\b/.test(line)) return "multi-line return";
         else out.push(line);
         continue;
@@ -277,8 +269,8 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
       if (r) {
         const c: Site = { pre: [], n: 0, hole: "" };
         const f = peel(r[2], name, c);
-        if (f === "$r") site(r[1], c, null);
-        else site(r[1], c, `($r) => (${f})`);
+        if (f === "be$r") site(r[1], c, null);
+        else site(r[1], c, `(be$r) => (${f})`);
         continue;
       }
       const cm = line.match(constRe);
@@ -291,7 +283,7 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
           rest.push(lines[k]);
           const c: Site = { pre: [], n: 0, hole: "" };
           const f = peel(cm[3], name, c);
-          const frame = `($r) => { const ${cm[2]} = ${f}; ${rest.map((l) => l.trim()).join(" ")} }`;
+          const frame = `(be$r) => { const ${cm[2]} = ${f}; ${rest.map((l) => l.trim()).join(" ")} }`;
           site(cm[1], c, frame);
           i = k;
           continue;
@@ -310,7 +302,7 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
 export function loopify(js: string): { js: string; stayed: Stayed[] } {
   const stayed: Stayed[] = [];
   let helper = false;
-  const unwind = freshName(js, "$unwind$");
+  const unwind = UNWIND;
   const out = js.replace(/^function (\$[\w$]*\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm, (whole, name: string, ps: string, body: string) => {
     if (!occ(body, name)) return whole; // not recursive
     const params = ps.split(",").map((p) => p.trim()).filter(Boolean);
@@ -320,7 +312,7 @@ export function loopify(js: string): { js: string; stayed: Stayed[] } {
       return whole;
     }
     helper = true;
-    return `function ${name}(${ps}) {\n  const $stk = [];\n  for (;;) {\n${r[0]}\n  }\n}`;
+    return `function ${name}(${ps}) {\n  const be$stk = [];\n  for (;;) {\n${r[0]}\n  }\n}`;
   });
   return { js: helper ? out.replace(/^function /m, () => unwindHelper(unwind) + "function ") : out, stayed };
 }

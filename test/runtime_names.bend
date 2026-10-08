@@ -21,7 +21,7 @@ def class(n: Nat) -> Nat:
 # Text that spells the names bend-emit binds its exports to: data, not a
 # collision.
 def message() -> String:
-  "$bend_emit $bend_emit$0"
+  "be$default be$0"
 
 # The name the declaration file gives its default object, when nothing else
 # uses it.

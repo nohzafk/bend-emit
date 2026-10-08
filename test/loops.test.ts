@@ -269,13 +269,14 @@ test("a const hole inside bend's for(;;) with tail continues", () => {
 });
 test("own name as a value", () => stays("$f$", head + `    return {$: "Con", "head": $f$, "tail": ($f$(_t_0))};\n  }`));
 
-test("the frame-folding helper takes a name the module does not use", () => {
+test("the frame-folding helper does not collide with a def named unwind", () => {
   const user = `function $unwind$(_s_0) {\n  return 7;\n}`;
   const src = user + "\n" + fn("$f$", head + `    return {$: "P", "a": ($f$(_t_0)), "b": 1};\n  }`);
   const r = loopify(src);
   expect(r.stayed).toEqual([]);
   expect(r.js).toContain(user);
   expect(r.js.match(/^function \$unwind\$\(/gm)?.length).toBe(1);
+  expect(r.js.match(/^function be\$unwind\(/gm)?.length).toBe(1);
   const m = new Function(r.js + "; return [$unwind$, $f$];")();
   expect(m[0]()).toBe(7);
   expect(m[1]({ $: "Con", head: 0, tail: { $: "Nil" } })).toEqual({ $: "P", a: { $: "Nil" }, b: 1 });

@@ -222,7 +222,7 @@ describe("a def named like a function of bend's runtime", () => {
   });
   test("text spelling the export binding names is data, not a collision", async () => {
     const m = await import("./dist/runtime_names.mjs");
-    expect(m.message()).toBe("$bend_emit $bend_emit$0");
+    expect(m.message()).toBe("be$default be$0");
   });
   test("a reserved word is reached through the default export only, and declared there", async () => {
     const m = await import("./dist/runtime_names.mjs");

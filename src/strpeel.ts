@@ -10,12 +10,12 @@
 // input. When a def only ever (1) tests S for "", (2) reads its head, and (3) hands
 // the tail to its own next loop step or to a def that itself only tests and reads
 // the head, the tail is never needed as a string. It is carried as an index: the
-// string parameter stays the same object, and a hidden trailing parameter `<P>$i`
+// string parameter stays the same object, and a hidden trailing parameter `be$i<P>`
 // (default 0, so every outside caller is unchanged) says where the logical string
 // starts. Two shapes are handled:
 //
 //   reader   function f(.., P, ..)  where every use of P is `P === ""` or the head
-//            expression. Gets a trailing `P$i = 0`.
+//            expression. Gets a trailing `be$iP = 0`.
 //   walker   the for(;;) def of loops.ts / bend, whose parameter `$k` is read once
 //            per step as `const P = $k;`, and whose tail T is only assigned back
 //            to `$k` or passed to a reader.
@@ -33,6 +33,7 @@ const esc = (s: string) => s.replace(/[$.*+?^{}()|[\]\\]/g, "\\$&");
 const headOf = (p: string) => `(${p}.codePointAt(0) > 0xFFFF ? ${p}.slice(0, 2) : ${p}[0])`;
 const tailOf = (p: string) => `(${p}.codePointAt(0) > 0xFFFF ? ${p}.slice(2) : ${p}.slice(1))`;
 const idRe = (n: string) => new RegExp("(?<![\\w$])" + esc(n) + "(?![\\w$])", "g");
+const ix = (n: string) => "be$i" + n;
 const count = (s: string, sub: string) => s.split(sub).length - 1;
 
 // Uses of P left after the given idioms are removed.
@@ -59,7 +60,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       if (!p.startsWith("_")) return;
       const idioms = [`${p} === ""`, headOf(p)];
       if (count(body, headOf(p)) < 1 || stray(body, p, idioms) !== 0) return;
-      const q = p + "$i";
+      const q = ix(p);
       b = b.split(`${p} === ""`).join(`${q} >= ${p}.length`)
         .split(headOf(p)).join(`(${p}.codePointAt(${q}) > 0xFFFF ? ${p}.slice(${q}, ${q} + 2) : ${p}[${q}])`);
       np.push(`${q} = 0`);
@@ -81,7 +82,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       const al = b.match(new RegExp("^(\\s*)const (_\\w+) = " + esc(v) + ";$", "m"));
       if (!al) return;
       const P = al[2];
-      const vi = v + "$i", Pi = P + "$i";
+      const vi = ix(v), Pi = ix(P);
       const fail = (reason: string) => { kept.push({ name, param: v, reason }); };
       // the parameter itself: read once, otherwise only assigned
       const assigns = [...b.matchAll(new RegExp("^(\\s*)" + esc(v) + " = ([^\\n]*);$", "gm"))];
@@ -102,7 +103,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
           if (e < 0) continue;
           const args = splitTop(rest.slice(o + 1, e));
           if (!pos.some((p) => args[p] === T)) continue;
-          const extra = pos.map((p) => (args[p] === T ? `${Pi.replace(P, T)}` : "0"));
+          const extra = pos.map((p) => (args[p] === T ? ix(T) : "0"));
           const a2 = args.map((a, i) => (pos.includes(i) && a === T ? P : a));
           res += rest.slice(last, o + 1) + [...a2, ...extra].join(", ") + ")";
           last = e + 1;
@@ -117,7 +118,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       // commit
       let r = b;
       r = r.replace(al[0], `${al[1]}const ${P} = ${v};\n${al[1]}const ${Pi} = ${vi};`);
-      r = r.replace(tm[0], `${tm[1]}const ${T}$i = ${Pi} + (${P}.codePointAt(${Pi}) > 0xFFFF ? 2 : 1);`);
+      r = r.replace(tm[0], `${tm[1]}const ${ix(T)} = ${Pi} + (${P}.codePointAt(${Pi}) > 0xFFFF ? 2 : 1);`);
       // reader calls, on r
       for (const [f, pos] of readers) {
         const re = new RegExp("(?<![\\w$])" + esc(f) + "\\(", "g");
@@ -127,7 +128,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
           if (e < 0) continue;
           const args = splitTop(r.slice(o + 1, e));
           if (!pos.some((p) => args[p] === T)) continue;
-          const extra = pos.map((p) => (args[p] === T ? `${T}$i` : "0"));
+          const extra = pos.map((p) => (args[p] === T ? ix(T) : "0"));
           const a2 = args.map((a, i) => (pos.includes(i) && a === T ? P : a));
           res += r.slice(last, o + 1) + [...a2, ...extra].join(", ") + ")";
           last = e + 1;
@@ -136,7 +137,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
         r = res + r.slice(last);
       }
       r = r.replace(new RegExp("^(\\s*)" + esc(v) + " = ([^\\n]*);$", "gm"), (_w, ind: string, x: string) =>
-        x === T ? `${ind}${vi} = ${T}$i;` : `${ind}${v} = ${x}; ${vi} = 0;`);
+        x === T ? `${ind}${vi} = ${ix(T)};` : `${ind}${v} = ${x}; ${vi} = 0;`);
       r = r.split(`${P} === ""`).join(`${Pi} >= ${P}.length`)
         .split(headOf(P)).join(`(${P}.codePointAt(${Pi}) > 0xFFFF ? ${P}.slice(${Pi}, ${Pi} + 2) : ${P}[${Pi}])`);
       b = r;
