@@ -117,9 +117,19 @@ bend-emit applies these transformations:
 - **Constructor tags:** remove imported-module prefixes so tags match the
   bare names used by the generated declarations. Unresolved prefixed tags
   cause a build failure.
-- **Recursive list construction:** turn eligible self-recursion in a
-  constructor's last field into a loop and a reconstruction stack.
-  Other recursive shapes remain unchanged and produce a
+- **Recursive list traversal:** turn recursion on the tail of a list into a
+  loop. In a `return` expression with self-calls, the self-call evaluated
+  last (the "hole") is replaced by a loop step: what is evaluated before it
+  is evaluated first, in the same order; what follows it is pushed on a
+  per-call stack as a closure; the parameters are rebound to the hole's
+  arguments. Each other `return` folds the stack. This covers
+  `Con{head: f(x), tail: f(t)}`, `and(f(h), f(t))`, `n + f(t)`, `pick(c, v, f(t))`
+  and a self-call bound in a `const` just before the `return`, also inside
+  bend's own `for (;;)` loops. It reads shapes only and knows no names.
+  Self-calls other than the hole (the head, a nested child) stay real calls,
+  so nesting depth is still bounded by the stack. A def whose self-call is
+  under `||`, `&&` or `?:`, is not at the end of its branch, or uses its own
+  name as a value stays unchanged and produces a
   `still recursive: <name> (<why>)` diagnostic.
 - **Zero-field constructors:** reuse singleton values rather than allocating
   a new object for each occurrence.
