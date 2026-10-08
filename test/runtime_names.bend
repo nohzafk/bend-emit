@@ -13,3 +13,12 @@ def nat_host(b: Bool) -> Bool:
 
 def cmp_new(s: String) -> String:
   s
+
+# A name a module cannot bind: reached through the default export only.
+def class(n: Nat) -> Nat:
+  n
+
+# Text that spells the names bend-emit binds its exports to: data, not a
+# collision.
+def message() -> String:
+  "$bend_emit $bend_emit$0"

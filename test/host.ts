@@ -36,3 +36,8 @@ export const wrongMapPosition: BendMap<bigint> = { $: "MNode", pos: 1, lo: { $: 
 export const wrongField: BendResult<Err, bigint> = { $: "Done", error: { $: "Empty" } };
 // @ts-expect-error a Nat is a bigint, not a number
 export const wrongNumber: BendResult<Err, bigint> = { $: "Done", value: 3 };
+
+// Defs named like runtime functions are named exports; a def named with a
+// reserved word is reached through the default export only.
+import names, { message, run_lib } from "./dist/runtime_names.mjs";
+export const runtimeNamed: [bigint, string, bigint] = [run_lib(1n), message(), names.class(2n)];

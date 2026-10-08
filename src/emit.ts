@@ -30,7 +30,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { intrinsics, type Native, type Skipped } from "./intrinsics";
-import { loopify, occ, type Stayed } from "./loops";
+import { loopify, type Stayed } from "./loops";
 import { classify } from "./classes";
 import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -201,6 +201,16 @@ function tsType(t: string, datas: Map<string, string>, where: string): string {
 }
 
 const IDENT = /^[A-Za-z_$][\w$]*$/;
+// Words a module cannot bind as a name. A def so named is reached through the
+// default export only, as a def whose name is not an identifier is.
+const RESERVED = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+  "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "implements", "import",
+  "in", "instanceof", "interface", "let", "new", "null", "package", "private", "protected", "public",
+  "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while",
+  "with", "yield", "arguments", "eval",
+]);
+const bindable = (n: string) => IDENT.test(n) && !RESERVED.has(n);
 
 // A module's data types, with the scope its own fields are read in: its own
 // types, and those of the modules it imports, by the alias it gives them.
@@ -248,7 +258,7 @@ export function declarations(mods: Module[], defs: Def[]): string {
   for (const f of defs) {
     const sig = "(" + f.params.map(([n, t]) => `${n}: ${tsType(t, main, `def ${f.name}`)}`).join(", ")
       + "): " + tsType(f.ret, main, `def ${f.name}`);
-    if (IDENT.test(f.name)) out.push(`export declare function ${f.name}${sig};`);
+    if (bindable(f.name)) out.push(`export declare function ${f.name}${sig};`);
     members.push(`  ${JSON.stringify(f.name)}${sig};`);
   }
   out.push("", "declare const core: {", ...members, "};", "export default core;", "");
@@ -319,23 +329,23 @@ export function bareTags(chunk: string, root: string): string {
 //
 // A def's name is not declared in the module's scope: bend's runtime already
 // has top-level functions such as `run_lib` and `nat_host`, and a def of the
-// same name would redeclare it. Each def is bound to `HELD$<i>` instead (a
-// bend-emitted name always ends in `$`, so it cannot be one) and exported
-// under its own name.
+// same name would redeclare it. The object and each def are bound to names
+// built on a base the module's text does not contain anywhere (`$bend_emit`,
+// or `$bend_emit<k>` when it does), and each def is exported under its own
+// name. Avoiding the text, strings included, can only skip a usable base.
 export function exportsOf(chunk: string, names: string[]): string {
   const found = chunk.match(/^export /gm) ?? [];
   if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
   if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");
-  const pub = names.filter((n) => IDENT.test(n));
-  const local = (i: number) => `${HELD}$${i}`;
-  for (const n of [HELD, ...pub.map((_, i) => local(i))]) {
-    if (occ(chunk, n)) fail(`bend's module already uses ${n}, which bend-emit binds its exports to`);
-  }
-  const body = chunk.replace(/^export default \{$/m, `const ${HELD} = {`).trimEnd();
+  let held = HELD;
+  for (let k = 1; chunk.includes(held); k++) held = HELD + k;
+  const pub = names.filter(bindable);
+  const local = (i: number) => `${held}$${i}`;
+  const body = chunk.replace(/^export default \{$/m, `const ${held} = {`).trimEnd();
   return [
     body,
-    `export default ${HELD};`,
-    ...pub.map((n, i) => `const ${local(i)} = ${HELD}[${JSON.stringify(n)}];`),
+    `export default ${held};`,
+    ...pub.map((n, i) => `const ${local(i)} = ${held}[${JSON.stringify(n)}];`),
     ...(pub.length ? [`export { ${pub.map((n, i) => `${local(i)} as ${n}`).join(", ")} };`] : []),
     "",
   ].join("\n");
