@@ -33,6 +33,7 @@ import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { loopify, type Stayed } from "./loops";
 import { lazySelect } from "./select";
 import { classify } from "./classes";
+import { runtimeTree } from "./laws";
 import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
@@ -237,7 +238,7 @@ export function modules(path: string, prefix = "", seen = new Set<string>()): Mo
   return [{ prefix, datas, scope }, ...out];
 }
 
-export function declarations(mods: Module[], defs: Def[]): string {
+export function declarations(mods: Module[], defs: Def[], undeclared?: string[]): string {
   const out: string[] = [...PREAMBLE, ""];
   const written = new Map<string, string>();
   for (const { prefix, datas, scope } of mods) {
@@ -266,8 +267,17 @@ export function declarations(mods: Module[], defs: Def[]): string {
   for (const f of defs) {
     // A parameter name is not part of the type contract; one TypeScript cannot
     // bind is written be$<name>, a prefix no Bend name can spell.
-    const sig = "(" + f.params.map(([n, t]) => `${bindable(n) ? n : "be$" + n}: ${tsType(t, main, `def ${f.name}`)}`).join(", ")
-      + "): " + tsType(f.ret, main, `def ${f.name}`);
+    let sig: string;
+    try {
+      sig = "(" + f.params.map(([n, t]) => `${bindable(n) ? n : "be$" + n}: ${tsType(t, main, `def ${f.name}`)}`).join(", ")
+        + "): " + tsType(f.ret, main, `def ${f.name}`);
+    } catch (e) {
+      // Asked to (a laws file), leave a def without a TypeScript type out of
+      // the declaration; it stays in the module.
+      if (!undeclared) throw e;
+      undeclared.push(f.name);
+      continue;
+    }
     if (bindable(f.name)) out.push(`export declare function ${f.name}${sig};`);
     members.push(`  ${JSON.stringify(f.name)}${sig};`);
   }
@@ -396,8 +406,21 @@ export function importPrefixes(path: string, seen = new Set<string>(), out = new
   return out;
 }
 
-export async function build(corePath: string, outDir: string): Promise<{ js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[] }> {
-  const core = resolve(corePath);
+type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; undeclared: string[] };
+
+// A file that holds laws or lemmas is built from a copy without them (see
+// laws.ts), and there a def with no TypeScript type is left out of the .d.mts
+// with a warning; for any other file it still fails the build.
+export async function build(corePath: string, outDir: string): Promise<Built> {
+  const tree = runtimeTree(resolve(corePath));
+  try {
+    return await buildCore(tree.path, outDir, tree.path !== resolve(corePath));
+  } finally {
+    tree.cleanup();
+  }
+}
+
+async function buildCore(core: string, outDir: string, lenient: boolean): Promise<Built> {
   const { defs } = readDecls(readFileSync(core, "utf8"));
   // bend exports every filled def that is not IO (main is the usual one),
   // except a def with a template parameter (~rule: bend's .mjs target does not
@@ -417,7 +440,8 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   const esc = (x: string) => x.replace(/\./g, "\\.");
   const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
   const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
-  const dts = declarations(modules(core), lib.filter(hostable));
+  const undeclared: string[] = [];
+  const dts = declarations(modules(core), lib.filter(hostable), lenient ? undeclared : undefined);
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
   // Base defs whose emitted form cannot scale get a native equivalent first
@@ -452,7 +476,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, undeclared };
 }
 
 if (import.meta.main) {
@@ -466,6 +490,7 @@ if (import.meta.main) {
     console.log(`wrote ${r.js} and ${r.dts}`);
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
     for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
+    if (r.undeclared.length) console.log(`no TypeScript encoding, left out of the .d.mts: ${r.undeclared.join(", ")}`);
     for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$$/g, "")} (${s.reason})`);
   } catch (e) {
     console.error((e as Error).message);
