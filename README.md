@@ -125,6 +125,16 @@ bend-emit applies these transformations:
   UTF-16 unit as JavaScript's `<` does. The replacement happens only when the
   def is exactly the text this bend version emits; otherwise it is left as is
   and reported as `not made native: <name> (<why>)`.
+- **Lazy selectors:** bend evaluates call arguments eagerly, so
+  `pick(c, f(x), g(y))` runs both `f` and `g`. A def whose emitted body is
+  exactly `if (b) return p; else return q` over its own parameters (in Bend: a
+  match on one Bool parameter whose arms each return a parameter unchanged;
+  `-A` and `+`/`-` marks are irrelevant) is a selector, wherever it is defined
+  in the bundled core, imported or not. A call that is all of a `return`
+  becomes `if (b) { return X; } else { return Y; }`, so only the chosen
+  argument runs and a self-call stays at the end of its branch for the loop
+  pass below. Elsewhere the call becomes `(b ? X : Y)`, unless X or Y call the
+  enclosing def (that call stays eager). The selector def stays exported.
 - **Recursive list traversal:** turn recursion on the tail of a list into a
   loop. In a `return` expression with self-calls, the self-call evaluated
   last (the "hole") is replaced by a loop step: what is evaluated before it

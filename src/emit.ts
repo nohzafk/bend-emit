@@ -31,6 +31,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { loopify, type Stayed } from "./loops";
+import { lazySelect } from "./select";
 import { classify } from "./classes";
 import { peel, type Kept, type Peeled } from "./strpeel";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -422,7 +423,7 @@ export async function build(corePath: string, outDir: string): Promise<{ js: str
   // Base defs whose emitted form cannot scale get a native equivalent first
   // (see intrinsics.ts).
   const intr = intrinsics(bareTags(bundle(core), core));
-  const looped = loopify(intr.js);
+  const looped = loopify(lazySelect(intr.js).js);
   const peeled = peel(looped.js);
   const chunk = classify(peeled.js);
   const names = lib.map((d) => d.name);

@@ -269,7 +269,7 @@ function rewrite(name: string, params: string[], body: string, unwind: string): 
       if (r) {
         const c: Site = { pre: [], n: 0, hole: "" };
         const f = peel(r[2], name, c);
-        if (f === "be$r") site(r[1], c, null);
+        if (f.replace(/[()\s]/g, "") === "be$r") site(r[1], c, null);
         else site(r[1], c, `(be$r) => (${f})`);
         continue;
       }
