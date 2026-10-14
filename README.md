@@ -9,7 +9,7 @@ optimizations to Bend's JavaScript output.
 
 ## Quick Start
 
-Install **Bend 2.0.36** and **Bun**, with both `bend` and `bun` on PATH.
+Install **Bend 2.0.37** and **Bun**, with both `bend` and `bun` on PATH.
 The commands below also require Node.js and npm for `npx`.
 Installing this npm package does not install Bend or Bun.
 
@@ -33,7 +33,7 @@ Then import the generated module:
 ```ts
 import { add } from "./dist/core.mjs";
 
-add(2n, 3n); // 5n; the generated signature uses bigint
+add(2, 3); // 5; the generated signature uses number
 ```
 
 For a project-local installation:
@@ -100,14 +100,14 @@ Supported types follow Bend's runtime representation:
 
 | Bend | JavaScript / TypeScript |
 | --- | --- |
-| `Nat` | `bigint` |
+| `Nat` | `number`: a whole number from 0 to 2^53 |
 | `U32` | `number` |
 | `Bool` | `boolean` |
 | `String` | `string` |
 | `Char` | `string` containing one code point |
 | `Map<A>` | `BendMap<A>`: a tagged tree with `MTip`, `MLeaf`, and `MNode` |
 
-The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, and `BendEither` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `bigint`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
+The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, and `BendEither` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
 
 ### Runtime Transformations
 
@@ -197,7 +197,7 @@ Template definitions are not exported by Bend's ES-module target.
 
 ## Toolchain Requirements
 
-The build tool requires Bun and **exactly Bend 2.0.36**, the version recorded
+The build tool requires Bun and **exactly Bend 2.0.37**, the version recorded
 in `BEND_VERSION`. Another Bend version is rejected before compilation.
 
 The emitter reads and transforms compiler output, so a different compiler

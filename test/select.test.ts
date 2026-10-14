@@ -5,12 +5,12 @@ import { find, guarded, len, pick_m, pick_nat, type BendList } from "./dist/sele
 import { lazySelect } from "../src/select";
 import { loopify } from "../src/loops";
 
-const list = (n: number): BendList<bigint> => {
-  let l: BendList<bigint> = { $: "Nil" };
-  for (let i = 0; i < n; i++) l = { $: "Con", head: 1n, tail: l };
+const list = (n: number): BendList<number> => {
+  let l: BendList<number> = { $: "Nil" };
+  for (let i = 0; i < n; i++) l = { $: "Con", head: 1, tail: l };
   return l;
 };
-const cases = (tags: bigint[]) => {
+const cases = (tags: number[]) => {
   let c: any = { $: "NoCase" };
   for (let i = tags.length - 1; i >= 0; i--) c = { $: "Case", tag: tags[i], next: c };
   return c;
@@ -18,24 +18,24 @@ const cases = (tags: bigint[]) => {
 const DEEP = 100_000;
 
 test("the selector stays callable", () => {
-  expect(pick_nat(true, 1n, 2n)).toBe(1n);
-  expect(pick_nat(false, 1n, 2n)).toBe(2n);
+  expect(pick_nat(true, 1, 2)).toBe(1);
+  expect(pick_nat(false, 1, 2)).toBe(2);
   expect(pick_m(false, "a", "b")).toBe("b");
 });
 
 test("only the chosen argument is evaluated", () => {
   // The other arm would throw on its first step.
-  const top = 2n ** 48n - 1n;
-  expect(guarded(true, list(3), top)).toBe(0n);
+  const top = 2 ** 48 - 1;
+  expect(guarded(true, list(3), top)).toBe(0);
   expect(() => guarded(false, list(3), top)).toThrow();
 });
 
 test("a self-call under a selector is still a loop, 100k deep", () => {
-  expect(len(list(DEEP), 0n)).toBe(BigInt(DEEP));
-  const tags = Array.from({ length: DEEP }, (_, i) => BigInt(i));
-  expect(find(cases(tags), BigInt(DEEP - 1), 0n)).toBe(BigInt(DEEP - 1));
-  expect(find(cases(tags), 7n, 0n)).toBe(7n);
-  expect(find(cases([1n, 2n]), 9n, 0n)).toBe(0n);
+  expect(len(list(DEEP), 0)).toBe(DEEP);
+  const tags = Array.from({ length: DEEP }, (_, i) => i);
+  expect(find(cases(tags), DEEP - 1, 0)).toBe(DEEP - 1);
+  expect(find(cases(tags), 7, 0)).toBe(7);
+  expect(find(cases([1, 2]), 9, 0)).toBe(0);
 });
 
 const SEL = `function $pick$(_b_0, _x_0, _y_0) {\n  if (_b_0) {\n    return _x_0;\n  } else {\n    return _y_0;\n  }\n}\n\n`;

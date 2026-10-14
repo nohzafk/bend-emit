@@ -14,7 +14,7 @@ const mod = (await import(r.js)).default as Record<string, Function>;
 test("plain defs and types are emitted", () => {
   expect(Object.keys(mod).filter((k) => !k.includes(".")).sort()).toEqual(["spec_cmp", "spec_cmp_zero", "spec_double", "spec_heavier"]);
   expect(dts).toContain("export type Duo =");
-  expect(mod.spec_double(4n)).toBe(8n);
+  expect(mod.spec_double(4)).toBe(8);
 });
 
 test("laws, lemmas and defs that need them are skipped, silently", () => {

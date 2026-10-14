@@ -24,15 +24,15 @@ function sig(header: string): string {
 
 describe("the .d.mts", () => {
   test("each generic maps to its TypeScript type, nested too", () => {
-    expect(sig("def f(m: Maybe<&2, Nat>) -> Maybe<Nat>:")).toBe("export declare function f(m: BendMaybe<bigint>): BendMaybe<bigint>;");
+    expect(sig("def f(m: Maybe<&2, Nat>) -> Maybe<Nat>:")).toBe("export declare function f(m: BendMaybe<number>): BendMaybe<number>;");
     expect(sig("def f(r: Result<&2, &2, Err, List<&2, Nat>>) -> Unit:")).toBe(
-      "export declare function f(r: BendResult<Err, BendList<bigint>>): BendUnit;",
+      "export declare function f(r: BendResult<Err, BendList<number>>): BendUnit;",
     );
     expect(sig("def f(e: Either<Nat, Bool>) -> List<Maybe<Nat>>:")).toBe(
-      "export declare function f(e: BendEither<bigint, boolean>): BendList<BendMaybe<bigint>>;",
+      "export declare function f(e: BendEither<number, boolean>): BendList<BendMaybe<number>>;",
     );
     expect(sig("def f(m: Map<&2, Nat>) -> Map<Nat>:")).toBe(
-      "export declare function f(m: BendMap<bigint>): BendMap<bigint>;",
+      "export declare function f(m: BendMap<number>): BendMap<number>;",
     );
   });
 
@@ -71,49 +71,49 @@ describe("what the tool writes", () => {
 
 describe("at run time", () => {
   test("Result: the first error, with its place, or the value", () => {
-    expect(sum_or_err(list([1n, 2n, 3n]), 5n)).toEqual({ $: "Done", value: 6n });
-    expect(sum_or_err(list([1n, 9n, 7n]), 5n)).toEqual({ $: "Fail", error: { $: "TooBig", index: 1n, got: 9n } });
-    expect(sum_or_err(list<bigint>([]), 5n)).toEqual({ $: "Fail", error: { $: "Empty" } });
+    expect(sum_or_err(list([1, 2, 3]), 5)).toEqual({ $: "Done", value: 6 });
+    expect(sum_or_err(list([1, 9, 7]), 5)).toEqual({ $: "Fail", error: { $: "TooBig", index: 1, got: 9 } });
+    expect(sum_or_err(list<number>([]), 5)).toEqual({ $: "Fail", error: { $: "Empty" } });
   });
 
   test("Maybe, Either and Unit, out and in", () => {
-    expect(first_big(list([1n]), 5n, 0n)).toEqual({ $: "None" });
-    expect(unwrap({ $: "Some", value: 7n }, 1n)).toBe(7n);
-    expect(unwrap({ $: "None" }, 1n)).toBe(1n);
-    expect(side(true, 4n)).toEqual({ $: "Inl", value: 4n });
-    expect(side(false, 4n)).toEqual({ $: "Inr", value: false });
-    expect(unit(0n)).toEqual({ $: "Unit" });
+    expect(first_big(list([1]), 5, 0)).toEqual({ $: "None" });
+    expect(unwrap({ $: "Some", value: 7 }, 1)).toBe(7);
+    expect(unwrap({ $: "None" }, 1)).toBe(1);
+    expect(side(true, 4)).toEqual({ $: "Inl", value: 4 });
+    expect(side(false, 4)).toEqual({ $: "Inr", value: false });
+    expect(unit(0)).toEqual({ $: "Unit" });
   });
 });
 
 describe("Map on the boundary", () => {
   test("declares the native tree and recursive mapped values", () => {
     const dts = readFileSync(new URL("./dist/maps.d.mts", import.meta.url), "utf8");
-    expect(dts).toContain('export type BendMap<T> = { $: "MTip" } | { $: "MLeaf"; key: string; val: T } | { $: "MNode"; pos: bigint; lo: BendMap<T>; hi: BendMap<T> };');
+    expect(dts).toContain('export type BendMap<T> = { $: "MTip" } | { $: "MLeaf"; key: string; val: T } | { $: "MNode"; pos: number; lo: BendMap<T>; hi: BendMap<T> };');
     expect(dts).toContain('"children": BendMap<Value>');
   });
 
-  test("empty, insert, overwrite, lookup, and bigint node positions", () => {
+  test("empty, insert, overwrite, lookup, and number node positions", () => {
     const zero = empty();
     expect(zero).toEqual({ $: "MTip" });
-    const one = insert(zero, "a", 1n);
-    expect(one).toEqual({ $: "MLeaf", key: "a", val: 1n });
-    const two = insert(one, "b", 2n);
+    const one = insert(zero, "a", 1);
+    expect(one).toEqual({ $: "MLeaf", key: "a", val: 1 });
+    const two = insert(one, "b", 2);
     expect(two.$).toBe("MNode");
-    if (two.$ === "MNode") expect(typeof two.pos).toBe("bigint");
-    expect(lookup(two, "a", 99n)).toBe(1n);
-    expect(lookup(two, "b", 99n)).toBe(2n);
-    expect(lookup(two, "missing", 99n)).toBe(99n);
-    const updated = insert(two, "a", 3n);
-    expect(lookup(updated, "a", 99n)).toBe(3n);
-    expect(lookup(updated, "b", 99n)).toBe(2n);
-    expect(lookup(two, "a", 99n)).toBe(1n);
+    if (two.$ === "MNode") expect(typeof two.pos).toBe("number");
+    expect(lookup(two, "a", 99)).toBe(1);
+    expect(lookup(two, "b", 99)).toBe(2);
+    expect(lookup(two, "missing", 99)).toBe(99);
+    const updated = insert(two, "a", 3);
+    expect(lookup(updated, "a", 99)).toBe(3);
+    expect(lookup(updated, "b", 99)).toBe(2);
+    expect(lookup(two, "a", 99)).toBe(1);
   });
 
   test("a host-built leaf and recursive map value round-trip", () => {
-    const input: BendMap<bigint> = { $: "MLeaf", key: "x", val: 7n };
-    expect(lookup(input, "x", 0n)).toBe(7n);
-    const value = { $: "Branch" as const, children: { $: "MLeaf" as const, key: "child", val: { $: "Leaf" as const, n: 42n } } };
+    const input: BendMap<number> = { $: "MLeaf", key: "x", val: 7 };
+    expect(lookup(input, "x", 0)).toBe(7);
+    const value = { $: "Branch" as const, children: { $: "MLeaf" as const, key: "child", val: { $: "Leaf" as const, n: 42 } } };
     expect(value_identity(value)).toEqual(value);
   });
 });
@@ -121,12 +121,12 @@ describe("Map on the boundary", () => {
 describe("a core that imports another", () => {
   test("the imported types are declared under the alias, and used by name", () => {
     const dts = readFileSync(new URL("./dist/uses.d.mts", import.meta.url), "utf8");
-    expect(dts).toContain('export type G_Err = { $: "Empty" } | { $: "TooBig"; "index": bigint; "got": bigint };');
+    expect(dts).toContain('export type G_Err = { $: "Empty" } | { $: "TooBig"; "index": number; "got": number };');
     expect(dts).toContain('export type Wrapped = { $: "Wrapped"; "err": G_Err };');
-    expect(dts).toContain("export declare function first_or_none(xs: BendList<bigint>, lim: bigint): BendMaybe<G_Err>;");
+    expect(dts).toContain("export declare function first_or_none(xs: BendList<number>, lim: number): BendMaybe<G_Err>;");
   });
   test("its defs run, on the imported module's values", () => {
-    expect(first_or_none(list([1n, 9n]), 5n)).toEqual({ $: "Some", value: { $: "TooBig", index: 1n, got: 9n } });
+    expect(first_or_none(list([1, 9]), 5)).toEqual({ $: "Some", value: { $: "TooBig", index: 1, got: 9 } });
     expect(wrap({ $: "Empty" })).toEqual({ $: "Wrapped", err: { $: "Empty" } });
   });
   test("an imported constructor's tag is its bare name, whatever the compiler writes", () => {
@@ -170,26 +170,26 @@ describe("generic data, and types that depend on a value", () => {
   test("a generic data type is declared with its parameters, and used applied", () => {
     const dts = readFileSync(new URL("./dist/dependent.d.mts", import.meta.url), "utf8");
     expect(dts).toContain('export type Two<A, B> = { $: "Two"; "a": A; "b": B };');
-    expect(dts).toContain("export declare function swap(t: Two<bigint, string>): Two<string, bigint>;");
+    expect(dts).toContain("export declare function swap(t: Two<number, string>): Two<string, number>;");
   });
 
   test("a type computed by a def, and a def over one or with an erased parameter, are not declared", () => {
     const dts = readFileSync(new URL("./dist/dependent.d.mts", import.meta.url), "utf8");
     for (const d of ["Pick", "zero", "id"]) expect(dts).not.toContain(`export declare function ${d}(`);
-    expect(dts).toContain("export declare function id_nat(n: bigint): bigint;");
+    expect(dts).toContain("export declare function id_nat(n: number): number;");
   });
 
   test("they still run: the module keeps them, undeclared", async () => {
     const mod = (await import("./dist/dependent.mjs")).default as Record<string, (...a: unknown[]) => unknown>;
-    expect(mod.swap({ $: "Two", a: 1n, b: "x" })).toEqual({ $: "Two", a: "x", b: 1n });
-    expect(mod.id_nat(7n)).toBe(7n);
+    expect(mod.swap({ $: "Two", a: 1, b: "x" })).toEqual({ $: "Two", a: "x", b: 1 });
+    expect(mod.id_nat(7)).toBe(7);
     expect(Object.keys(mod)).toContain("zero");
   });
 
   test("a type computed by an imported def (D.Pick) keeps a def over it out of the .d.mts", () => {
     const dts = readFileSync(new URL("./dist/dependent_user.d.mts", import.meta.url), "utf8");
     expect(dts).not.toContain("export declare function zero_of(");
-    expect(dts).toContain("export declare function one(): bigint;");
+    expect(dts).toContain("export declare function one(): number;");
   });
 
   test("a type parameter of a kind other than Data is refused, by name", () => {
@@ -219,7 +219,7 @@ describe("Char, and a type body with comments and blank lines", () => {
 describe("a def named like a function of bend's runtime", () => {
   test("the module loads, and each def is exported under its own name", async () => {
     const m = await import("./dist/runtime_names.mjs");
-    expect([m.run_lib(3n), m.run_loop(3n), m.nat_host(true), m.cmp_new("x")]).toEqual([3n, 4n, true, "x"]);
+    expect([m.run_lib(3), m.run_loop(3), m.nat_host(true), m.cmp_new("x")]).toEqual([3, 4, true, "x"]);
     expect(Object.keys(m).sort()).toEqual(["cmp_new", "core", "default", "keywords", "message", "nat_host", "run_lib", "run_loop"]);
   });
   test("text spelling the export binding names is data, not a collision", async () => {
@@ -228,24 +228,24 @@ describe("a def named like a function of bend's runtime", () => {
   });
   test("a reserved word is reached through the default export only, and declared there", async () => {
     const m = await import("./dist/runtime_names.mjs");
-    expect(m.default.class(2n)).toBe(2n);
+    expect(m.default.class(2)).toBe(2);
     const dts = await Bun.file(new URL("./dist/runtime_names.d.mts", import.meta.url)).text();
     expect(dts).not.toContain("function class");
-    expect(dts).toContain('"class"(n: bigint): bigint;');
+    expect(dts).toContain('"class"(n: number): number;');
   });
   test("the default object is be$default, beside a def named core", async () => {
     const dts = await Bun.file(new URL("./dist/runtime_names.d.mts", import.meta.url)).text();
-    expect(dts).toContain("export declare function core(n: bigint): bigint;");
+    expect(dts).toContain("export declare function core(n: number): number;");
     expect(dts).toContain("declare const be$default: {");
     expect(dts).toContain("export default be$default;");
     expect(dts).not.toContain("$bend_emit");
   });
   test("a parameter that is a reserved word is written be$<name>; ordinary ones stay", async () => {
     const dts = await Bun.file(new URL("./dist/runtime_names.d.mts", import.meta.url)).text();
-    expect(dts).toContain("export declare function keywords(be$class: bigint, be$default: bigint): bigint;");
-    expect(dts).toContain("export declare function core(n: bigint): bigint;");
+    expect(dts).toContain("export declare function keywords(be$class: number, be$default: number): number;");
+    expect(dts).toContain("export declare function core(n: number): number;");
     const m = await import("./dist/runtime_names.mjs");
-    expect(m.keywords(1n, 2n)).toBe(3n);
+    expect(m.keywords(1, 2)).toBe(3);
   });
 });
 

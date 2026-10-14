@@ -10,10 +10,10 @@
 
 import { sum_or_err, type BendList } from "./dist/generics.mjs";
 
-const numbers: BendList<bigint> = { $: "Nil" };
+const numbers: BendList<number> = { $: "Nil" };
 
-// A Nat is a bigint; a BendList is a tagged list, not a string.
-export const wrong = sum_or_err("not a list", 5n);
+// A Nat is a number; a BendList is a tagged list, not a string.
+export const wrong = sum_or_err("not a list", 5);
 
 // The second parameter is a Nat, so a JS number is wrong too.
 export const also_wrong = sum_or_err(numbers, 5);

@@ -5,7 +5,7 @@ import { sum_or_err, type BendResult, type Err } from "./dist/generics.mjs";
 import { empty, insert, lookup, type BendMap } from "./dist/maps.mjs";
 
 // Every error is handled: remove a case and `never` fails to typecheck.
-export function describe(r: BendResult<Err, bigint>): string {
+export function describe(r: BendResult<Err, number>): string {
   switch (r.$) {
     case "Done":
       return `total ${r.value}`;
@@ -25,21 +25,21 @@ export function describe(r: BendResult<Err, bigint>): string {
   }
 }
 
-export const ok = describe(sum_or_err({ $: "Nil" }, 1n));
+export const ok = describe(sum_or_err({ $: "Nil" }, 1));
 
-export const mapOk = lookup(insert(empty(), "ok", 8n), "ok", 0n);
+export const mapOk = lookup(insert(empty(), "ok", 8), "ok", 0);
 
-// @ts-expect-error a Map position is a bigint, not a number
-export const wrongMapPosition: BendMap<bigint> = { $: "MNode", pos: 1, lo: { $: "MTip" }, hi: { $: "MTip" } };
+// @ts-expect-error a Map position is a number, not a bigint
+export const wrongMapPosition: BendMap<number> = { $: "MNode", pos: 1n, lo: { $: "MTip" }, hi: { $: "MTip" } };
 
 // @ts-expect-error a Done carries `value`, not `error`
-export const wrongField: BendResult<Err, bigint> = { $: "Done", error: { $: "Empty" } };
-// @ts-expect-error a Nat is a bigint, not a number
-export const wrongNumber: BendResult<Err, bigint> = { $: "Done", value: 3 };
+export const wrongField: BendResult<Err, number> = { $: "Done", error: { $: "Empty" } };
+// @ts-expect-error a Nat is a number, not a bigint
+export const wrongNumber: BendResult<Err, number> = { $: "Done", value: 3n };
 
 // Defs named like runtime functions are named exports; a def named with a
 // reserved word is reached through the default export only.
 import names, { message, run_lib } from "./dist/runtime_names.mjs";
-export const runtimeNamed: [bigint, string, bigint] = [run_lib(1n), message(), names.class(2n)];
+export const runtimeNamed: [number, string, number] = [run_lib(1), message(), names.class(2)];
 import { core } from "./dist/runtime_names.mjs";
-export const namedCore: bigint = core(3n);
+export const namedCore: number = core(3);

@@ -58,17 +58,17 @@ test("text other than bend's own String.cmp is left alone and reported", () => {
 test("defs named like the generated helpers: the module loads and both run", () => {
   // $unwind$ is bend's name for `unwind` and was the loop helper's; $str_order$
   // would be any helper the native comparison added at the top level.
-  expect(unwind(5n)).toBe(5n);
-  expect(str_order("a", "b")).toBe(0n);
+  expect(unwind(5)).toBe(5);
+  expect(str_order("a", "b")).toBe(0);
   let xs: any = { $: "Nil" };
   for (let i = 0; i < 200000; i++) xs = { $: "Con", head: i % 2 ? "x" : "y", tail: xs };
-  expect(count_eq("x", xs)).toBe(100000n);
+  expect(count_eq("x", xs)).toBe(100000);
 });
 
 test("the native comparison adds no top-level name", () => {
   const src = (globalThis as any).Bun.file(new URL("./dist/strings.mjs", import.meta.url)).text();
   return src.then((t: string) => {
-    expect(t).not.toContain("$str_order$(a");
+    expect(t.match(/^function \$str_order\$\(/gm)?.length).toBe(1);
     expect(t.match(/^function \$String\$cmp\$\(/gm)?.length).toBe(1);
   });
 });

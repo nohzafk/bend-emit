@@ -153,7 +153,7 @@ const GENERICS: Record<string, { params: number; ts: string }> = {
 // fields by the names Base gives them.
 const PREAMBLE = [
   "export type BendList<T> = { $: \"Nil\" } | { $: \"Con\"; head: T; tail: BendList<T> };",
-  "export type BendMap<T> = { $: \"MTip\" } | { $: \"MLeaf\"; key: string; val: T } | { $: \"MNode\"; pos: bigint; lo: BendMap<T>; hi: BendMap<T> };",
+  "export type BendMap<T> = { $: \"MTip\" } | { $: \"MLeaf\"; key: string; val: T } | { $: \"MNode\"; pos: number; lo: BendMap<T>; hi: BendMap<T> };",
   "export type BendMaybe<T> = { $: \"None\" } | { $: \"Some\"; value: T };",
   "export type BendResult<E, A> = { $: \"Fail\"; error: E } | { $: \"Done\"; value: A };",
   "export type BendEither<A, B> = { $: \"Inl\"; value: A } | { $: \"Inr\"; value: B };",
@@ -166,7 +166,7 @@ const PREAMBLE_TYPES = new Set(PREAMBLE.map((l) => l.match(/^export type (\w+)/)
 // A Bend type as the runtime encodes it. `scope` maps a data type's name, as
 // the module that uses it writes it, to its TypeScript name.
 function tsType(t: string, datas: Map<string, string>, where: string): string {
-  if (t === "Nat") return "bigint";
+  if (t === "Nat") return "number";
   if (t === "Bool") return "boolean";
   if (t === "String") return "string";
   if (t === "U32") return "number";
