@@ -204,9 +204,6 @@ The emitter reads and transforms compiler output, so a different compiler
 version could change the shapes it relies on. Pin bend-emit and use the Bend
 version required by that release.
 
-Since 0.2.0, output files use `.mjs` and `.d.mts`, not `.js` and `.d.ts`.
-Projects updating from 0.1.0 must rebuild and update their import paths.
-
 ## Development
 
 From a checkout, install the development dependencies and run the gate:
