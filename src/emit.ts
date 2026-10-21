@@ -29,7 +29,6 @@
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { loopify, type Stayed } from "./loops";
 import { lazySelect } from "./select";
 import { classify } from "./classes";
@@ -315,56 +314,6 @@ export function bundle(core: string): string {
   }
 }
 
-// bend tags a constructor of an imported module with that module's import
-// path ("generics.TooBig", "../../bend-schema/core.RCons"). The .d.mts, and
-// every host that builds values by hand (bend-schema's codec), speak bare
-// names, so the tags are put back to bare names here. Two modules may share a
-// constructor name: every match is on a value of a known type, so a tag is
-// only ever compared within its own type, as it was before.
-export function bareTags(chunk: string, root: string): string {
-  const owner = new Map<string, string>();
-  const prefixes: [string, Set<string>][] = [];
-  const seen = new Set<string>();
-  const walk = (file: string, isRoot: boolean) => {
-    if (seen.has(file)) return;
-    seen.add(file);
-    const src = readFileSync(file, "utf8");
-    const ctors = new Set(readDecls(src).datas.flatMap((d) => d.ctors.map((c) => c.name)));
-    for (const c of ctors) owner.set(c, file);
-    if (!isRoot) prefixes.push([relative(dirname(root), file).replace(/\.bend$/, ""), ctors]);
-    for (const m of src.matchAll(/^import (\.{1,2}\/\S+\.bend) as [A-Za-z_]\w*\s*$/gm)) walk(resolve(dirname(file), m[1]), false);
-  };
-  walk(root, true);
-  // Only a constructor tag is rewritten: bend writes one as a `$` key
-  // (`$: "x.C"`, `this.$ = "x.C"`), a `$` comparison (`.$ === "x.C"`) or a
-  // switch label (`case "x.C":`). A string literal anywhere else is user data
-  // and stays byte for byte, even when it reads like a tag.
-  const site = String.raw`((?<![\w$])\$\??\s*(?::|=|[=!]==?)\s*|\bcase\s+)`;
-  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
-  let out = chunk;
-  for (const [prefix, ctors] of prefixes) {
-    for (const c of ctors) {
-      out = out.replace(new RegExp(`${site}${esc(JSON.stringify(`${prefix}.${c}`))}`, "g"), (_, lead) => lead + JSON.stringify(c));
-    }
-  }
-  // Whatever is left is a tag in a form this rewrite does not know, or a user
-  // string with exactly the text of a tag; the two cannot be told apart, so
-  // neither is let through.
-  const left = new Set<string>();
-  for (const [prefix, ctors] of prefixes) {
-    for (const c of ctors) {
-      const lit = JSON.stringify(`${prefix}.${c}`);
-      if (out.includes(lit)) left.add(lit);
-    }
-  }
-  if (left.size) {
-    fail(
-      `the string literal ${[...left].join(", ")} is left in the module: it is either a constructor tag bend-emit could not rewrite, or a user string with exactly the text of an imported constructor's tag. Such a user string must be changed`,
-    );
-  }
-  return out;
-}
-
 // bend's module is `export default { name: fn, ... }` and nothing else. A host
 // says `import { name } from "./dist/core.mjs"`, and the .d.mts declares those
 // names, so the object is bound to `be$default` and each def is re-exported from it.
@@ -394,19 +343,23 @@ export function exportsOf(chunk: string, names: string[]): string {
 
 // The export-name prefixes of every .bend file a core reaches, transitively.
 // bend names an imported def by the import path as written in the file that
-// imports it, with "./" dropped: "../keys/core." from comp, "generics." for
-// "./generics.bend".
+// imports it, with "./" dropped, then ":": "../keys/core:" from comp,
+// "generics:" for "./generics.bend". (Through bend 2.0.37 the separator was ".".)
+//
+// A constructor's tag needs no such care: since 2.0.38 bend tags it with its
+// name in the file that declares it ("TooBig", not "generics.TooBig"), which is
+// the name the .d.mts and every host that builds values by hand speak.
 export function importPrefixes(path: string, seen = new Set<string>(), out = new Set<string>()): Set<string> {
   if (seen.has(path)) return out;
   seen.add(path);
   for (const m of readFileSync(path, "utf8").matchAll(/^import (\.{1,2}\/\S+)\.bend as \w+\s*$/gm)) {
-    out.add(m[1].replace(/^\.\//, "") + ".");
+    out.add(m[1].replace(/^\.\//, "") + ":");
     importPrefixes(resolve(dirname(path), m[1] + ".bend"), seen, out);
   }
   return out;
 }
 
-type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; undeclared: string[] };
+type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; undeclared: string[] };
 
 // A file that holds laws or lemmas is built from a copy without them (see
 // laws.ts), and there a def with no TypeScript type is left out of the .d.mts
@@ -444,10 +397,9 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   const dts = declarations(modules(core), lib.filter(hostable), lenient ? undeclared : undefined);
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
-  // Base defs whose emitted form cannot scale get a native equivalent first
-  // (see intrinsics.ts).
-  const intr = intrinsics(bareTags(bundle(core), core));
-  const looped = loopify(lazySelect(intr.js).js);
+  // (Base's String comparison needs no native stand-in since bend 2.0.38: bend
+  // emits String.order as a loop, and its Char may be a packed non-scalar.)
+  const looped = loopify(lazySelect(bundle(core)).js);
   const peeled = peel(looped.js);
   const chunk = classify(peeled.js);
   const names = lib.map((d) => d.name);
@@ -466,7 +418,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   // The module also carries the defs of every .bend file the core reaches,
   // directly or through another import; those are theirs. Each is named by
   // its import path as written in the file that imports it
-  // ("../schema-lib/core.check", or "generics.first_big" for
+  // ("../schema-lib/core:check", or "generics:first_big" for
   // "./generics.bend"), so the prefixes are collected file by file.
   const imported = [...importPrefixes(core)];
   const have = Object.keys(mod).filter((k) => !imported.some((p) => k.startsWith(p))).sort();
@@ -476,7 +428,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, undeclared };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, undeclared };
 }
 
 if (import.meta.main) {
@@ -491,7 +443,6 @@ if (import.meta.main) {
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
     for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
     if (r.undeclared.length) console.log(`no TypeScript encoding, left out of the .d.mts: ${r.undeclared.join(", ")}`);
-    for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$$/g, "")} (${s.reason})`);
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);

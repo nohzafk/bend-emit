@@ -12,7 +12,7 @@ const dts = readFileSync(r.dts, "utf8");
 const mod = (await import(r.js)).default as Record<string, Function>;
 
 test("plain defs and types are emitted", () => {
-  expect(Object.keys(mod).filter((k) => !k.includes(".")).sort()).toEqual(["spec_cmp", "spec_cmp_zero", "spec_double", "spec_heavier"]);
+  expect(Object.keys(mod).filter((k) => !k.includes(":")).sort()).toEqual(["spec_cmp", "spec_cmp_zero", "spec_double", "spec_heavier"]);
   expect(dts).toContain("export type Duo =");
   expect(mod.spec_double(4)).toBe(8);
 });
@@ -22,7 +22,7 @@ test("laws, lemmas and defs that need them are skipped, silently", () => {
     expect(Object.keys(mod)).not.toContain(n);
     expect(dts).not.toContain(n);
   }
-  expect(r.stayed.length + r.kept.length + r.skipped.length).toBe(0);
+  expect(r.stayed.length + r.kept.length).toBe(0);
 });
 
 test("a def with no TypeScript encoding stays in the module, undeclared", () => {

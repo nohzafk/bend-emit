@@ -33,8 +33,8 @@ const JS_WORDS = new Set([
 // is read at its source: every name a JS literal in src/ *declares* (function
 // and arrow parameters, const/let/var, class) must start with `be$`. A `${...}`
 // interpolation is a name computed elsewhere and is skipped; the names bend
-// itself spells (`_a_0`, `$String$cmp$`), which intrinsics.ts matches or
-// replaces, are not bend-emit's.
+// itself spells (`_a_0`, and `$f$` in the unit tests' bend-2.0.37-shaped
+// text), which the passes match, are not bend-emit's.
 const BEND_SPELLED = /^(?:_\w+_\d+|\$[\w$]*\$)$/;
 // The string and template literals of a TypeScript source, comments and regex
 // literals skipped; a `${...}` hole reads as `@` and its code is lexed in turn.
@@ -96,7 +96,7 @@ export function declared(src: string): string[] {
 }
 
 describe("names bend-emit's own text declares", () => {
-  for (const f of ["loops", "classes", "strpeel", "intrinsics", "emit"]) {
+  for (const f of ["loops", "classes", "strpeel", "select", "emit"]) {
     test(`src/${f}.ts declares only be$ names`, () => {
       expect(declared(readFileSync(fileURLToPath(new URL(`../src/${f}.ts`, import.meta.url)), "utf8"))).toEqual([]);
     });

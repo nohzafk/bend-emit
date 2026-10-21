@@ -9,7 +9,7 @@ optimizations to Bend's JavaScript output.
 
 ## Quick Start
 
-Install **Bend 2.0.37** and **Bun**, with both `bend` and `bun` on PATH.
+Install **Bend 2.0.38** and **Bun**, with both `bend` and `bun` on PATH.
 The commands below also require Node.js and npm for `npx`.
 Installing this npm package does not install Bend or Bun.
 
@@ -114,17 +114,6 @@ The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `
 The generated module is not byte-for-byte identical to Bend's output.
 bend-emit applies these transformations:
 
-- **Constructor tags:** remove imported-module prefixes so tags match the
-  bare names used by the generated declarations. Unresolved prefixed tags
-  cause a build failure.
-- **Native string comparison:** Base's `String.cmp`, which every
-  `String.eq`, `String.order` and `String.is_*` goes through, walks two
-  strings through a pair of defs that call each other, one character at a
-  time, slicing a new tail per step. It is replaced by a native function that
-  returns the same value, ordering by code point (a Bend `Char`), not by
-  UTF-16 unit as JavaScript's `<` does. The replacement happens only when the
-  def is exactly the text this bend version emits; otherwise it is left as is
-  and reported as `not made native: <name> (<why>)`.
 - **Lazy selectors:** bend evaluates call arguments eagerly, so
   `pick(c, f(x), g(y))` runs both `f` and `g`. A def whose emitted body is
   exactly `if (b) return p; else return q` over its own parameters (in Bend: a
@@ -197,7 +186,7 @@ Template definitions are not exported by Bend's ES-module target.
 
 ## Toolchain Requirements
 
-The build tool requires Bun and **exactly Bend 2.0.37**, the version recorded
+The build tool requires Bun and **exactly Bend 2.0.38**, the version recorded
 in `BEND_VERSION`. Another Bend version is rejected before compilation.
 
 The emitter reads and transforms compiler output, so a different compiler

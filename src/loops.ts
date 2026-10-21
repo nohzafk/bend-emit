@@ -303,7 +303,7 @@ export function loopify(js: string): { js: string; stayed: Stayed[] } {
   const stayed: Stayed[] = [];
   let helper = false;
   const unwind = UNWIND;
-  const out = js.replace(/^function (\$[\w$]*\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm, (whole, name: string, ps: string, body: string) => {
+  const out = js.replace(/^function (\$[\w$]*)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm, (whole, name: string, ps: string, body: string) => {
     if (!occ(body, name)) return whole; // not recursive
     const params = ps.split(",").map((p) => p.trim()).filter(Boolean);
     const r = rewrite(name, params, body, unwind);

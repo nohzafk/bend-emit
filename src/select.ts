@@ -34,7 +34,7 @@ import { close, occ, splitTop } from "./loops";
 
 interface Selector { arity: number; b: number; x: number; y: number }
 
-const FN = /^function (\$[\w$]*\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm;
+const FN = /^function (\$[\w$]*)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm;
 const RET = /^(\s*)return ([\s\S]*);\s*$/;
 
 // name -> which parameters are the condition and the two results.

@@ -2,7 +2,7 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { bareTags, declarations, readDecls } from "../src/emit";
+import { declarations, readDecls } from "../src/emit";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,12 +139,12 @@ describe("a core that imports another", () => {
 
 describe("a core that reaches a file only through another import", () => {
   // reuses.bend imports uses.bend, which imports generics.bend: the module
-  // carries generics' defs under "generics.", the prefix uses.bend gives them.
+  // carries generics' defs under "generics:", the prefix uses.bend gives them.
   test("its exports are its own defs, and they run", async () => {
     const mod = await import("./dist/reuses.mjs");
     const keys = Object.keys(mod.default);
-    expect(keys.filter((k) => !k.startsWith("uses.") && !k.startsWith("generics."))).toEqual(["rewrap"]);
-    expect(keys.some((k) => k.startsWith("generics."))).toBe(true);
+    expect(keys.filter((k) => !k.startsWith("uses:") && !k.startsWith("generics:"))).toEqual(["rewrap"]);
+    expect(keys.some((k) => k.startsWith("generics:"))).toBe(true);
     expect(Object.keys(mod).sort()).toEqual(["default", "rewrap"]);
     expect(mod.rewrap({ $: "Wrapped", err: { $: "Empty" } })).toEqual({ $: "Wrapped", err: { $: "Empty" } });
   });
@@ -272,29 +272,5 @@ describe("an imported data type whose TypeScript name is another type's", () => 
   });
   test("distinct names pass", () => {
     expect(declarations([mod("", ["A"]), mod("G_", ["Err"])], [])).toContain("export type G_Err");
-  });
-});
-
-describe("bareTags: tag sites and leftover strings", () => {
-  const root = (() => {
-    const dir = mkdtempSync(join(tmpdir(), "bare-tags-"));
-    writeFileSync(join(dir, "generics.bend"), "type Err is Data:\n  TooBig{}\n");
-    writeFileSync(join(dir, "uses.bend"), "import ./generics.bend as G\n");
-    return join(dir, "uses.bend");
-  })();
-  test("a tag at a tag site is rewritten to the bare name", () => {
-    expect(bareTags('x = {$: "generics.TooBig"}; if (a.$ === "generics.TooBig") {}', root)).toBe('x = {$: "TooBig"}; if (a.$ === "TooBig") {}');
-  });
-  test("a user string equal to an imported constructor's tag fails the build", () => {
-    const msg = 'the string literal "generics.TooBig" is left in the module: it is either a constructor tag bend-emit could not rewrite, or a user string with exactly the text of an imported constructor\'s tag. Such a user string must be changed';
-    expect(() => bareTags('return "generics.TooBig";', root)).toThrow(msg);
-  });
-  test("a string merely containing the tag, or a dotted non-tag, stays byte for byte", () => {
-    const js = 'a("error: generics.TooBig"); b("generics.Nope");';
-    expect(bareTags(js, root)).toBe(js);
-  });
-  test("an identifier ending in $ is not a tag site", () => {
-    expect(() => bareTags('foo$ = "generics.TooBig";', root)).toThrow("must be changed");
-    expect(bareTags('this.$ = "generics.TooBig";', root)).toBe('this.$ = "TooBig";');
   });
 });

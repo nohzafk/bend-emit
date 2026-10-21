@@ -1,10 +1,11 @@
-// src/intrinsics.ts: Base's String.cmp made native, and what it must equal.
+// Base's String comparison, as bend 2.0.38 emits it: the order bend-emit's
+// hosts rely on, at any length, beside defs named like bend-emit's helpers.
+// (Through 2.0.37 bend-emit put a native String.cmp in its place; see git log.)
 import { expect, test } from "bun:test";
-import { intrinsics } from "../src/intrinsics";
 import { count_eq, s_eq, s_gt, s_lt, str_order, unwind } from "./dist/strings.mjs";
 
-// Bend's reading of a JS string: one Char per step, by the head expression bend
-// emits (a code point above U+FFFF is two units; a lone surrogate is one).
+// Bend's reading of a JS string: one Char per step (a code point above U+FFFF
+// is two units; a lone surrogate is one).
 function chars(s: string): number[] {
   const out: number[] = [];
   for (let i = 0; i < s.length; ) {
@@ -14,7 +15,7 @@ function chars(s: string): number[] {
   }
   return out;
 }
-// Base's String.cmp as a list order: first differing Char, else the shorter.
+// Base's String order as a list order: first differing Char, else the shorter.
 function ref(a: string, b: string): number {
   const x = chars(a), y = chars(b);
   for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
@@ -47,28 +48,12 @@ test("a long shared prefix: no RangeError", () => {
   expect(s_eq(p, p + "a")).toBe(false);
 });
 
-test("text other than bend's own String.cmp is left alone and reported", () => {
-  const src = 'function $String$cmp$(_a_0, _b_0) {\n  return 1;\n}';
-  const r = intrinsics(src);
-  expect(r.js).toBe(src);
-  expect(r.native).toEqual([]);
-  expect(r.skipped.map((s) => s.name)).toEqual(["$String$cmp$"]);
-});
-
 test("defs named like the generated helpers: the module loads and both run", () => {
-  // $unwind$ is bend's name for `unwind` and was the loop helper's; $str_order$
-  // would be any helper the native comparison added at the top level.
+  // `unwind` is the name of bend-emit's loop helper but for its be$ prefix;
+  // count_eq is a recursion that only the loop pass makes safe at this depth.
   expect(unwind(5)).toBe(5);
   expect(str_order("a", "b")).toBe(0);
   let xs: any = { $: "Nil" };
   for (let i = 0; i < 200000; i++) xs = { $: "Con", head: i % 2 ? "x" : "y", tail: xs };
   expect(count_eq("x", xs)).toBe(100000);
-});
-
-test("the native comparison adds no top-level name", () => {
-  const src = (globalThis as any).Bun.file(new URL("./dist/strings.mjs", import.meta.url)).text();
-  return src.then((t: string) => {
-    expect(t.match(/^function \$str_order\$\(/gm)?.length).toBe(1);
-    expect(t.match(/^function \$String\$cmp\$\(/gm)?.length).toBe(1);
-  });
 });

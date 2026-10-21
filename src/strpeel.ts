@@ -46,7 +46,7 @@ function stray(body: string, p: string, idioms: string[]): number {
 export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] } {
   const peeled: Peeled[] = [];
   const kept: Kept[] = [];
-  const fnRe = /^function (\$[\w$]*\$)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm;
+  const fnRe = /^function (\$[\w$]*)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm;
 
   // pass 1: readers, and the def -> parameter positions they give
   const readers = new Map<string, number[]>();

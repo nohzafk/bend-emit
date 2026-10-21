@@ -1,7 +1,7 @@
 import Base
 
-# String comparison crosses as native code (src/intrinsics.ts): the same order
-# as Base's String.cmp, by code point, at any length.
+# String comparison as bend emits it (Base's String.order, a loop since 2.0.38):
+# by code point, at any length.
 
 def s_eq(a: String, b: String) -> Bool:
   String.eq(a, b)
@@ -13,7 +13,7 @@ def s_gt(a: String, b: String) -> Bool:
   String.is_gt(a, b)
 
 # Defs whose emitted names are what the generated helpers would be called
-# ($unwind$, $str_order$): the module must still load, with both kinds of name.
+# (unwind, str_order): the module must still load, with both kinds of name.
 def unwind(n: Nat) -> Nat:
   n
 
