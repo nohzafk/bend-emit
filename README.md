@@ -25,7 +25,7 @@ def add(a: Nat, b: Nat) -> Nat:
 Build it:
 
 ```sh
-npx --yes --package bend-emit@0.3.2 -- bend-emit core.bend dist
+npx --yes --package bend-emit@0.4.0 -- bend-emit core.bend dist
 ```
 
 Then import the generated module:
@@ -39,14 +39,14 @@ add(2, 3); // 5; the generated signature uses number
 For a project-local installation:
 
 ```sh
-npm install --save-dev --save-exact bend-emit@0.3.2
+npm install --save-dev --save-exact bend-emit@0.4.0
 npx bend-emit core.bend dist
 ```
 
 Bun users can install and run the same package:
 
 ```sh
-bun add --dev --exact bend-emit@0.3.2
+bun add --dev --exact bend-emit@0.4.0
 bunx bend-emit core.bend dist
 ```
 
