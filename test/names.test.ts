@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bundle } from "../src/emit";
 
-const FIXTURES = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names"];
+const FIXTURES = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "closure_last"];
 
 // Identifiers outside string literals and `//` comments.
 function idents(js: string): Set<string> {

@@ -324,7 +324,13 @@ export function bundle(core: string): string {
 // same name would redeclare it. The object is bound to `be$default` and each
 // def to `be$<i>`; bend never writes a name starting with `be$`, so they cannot
 // collide. Each def is exported under its own name.
-export function exportsOf(chunk: string, names: string[]): string {
+//
+// bend 2.0.38 writes the statement straight after the closing brace of the
+// module's last function when that function is a lifted closure, as
+// `}export default {` on one line (a def that passes a lambda, such as
+// `l => f(t, l)`, ends the module so). It is put on a line of its own first.
+export function exportsOf(raw: string, names: string[]): string {
+  const chunk = raw.replace(/^\}export default \{$/m, "}\nexport default {");
   const found = chunk.match(/^export /gm) ?? [];
   if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
   if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");

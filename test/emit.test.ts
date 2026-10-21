@@ -2,10 +2,11 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { declarations, readDecls } from "../src/emit";
+import { bundle, declarations, readDecls } from "../src/emit";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
 import { first_or_none, wrap } from "./dist/uses.mjs";
 import { code_of, double, kind } from "./dist/chars.mjs";
@@ -56,7 +57,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "select"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "select", "closure_last"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -246,6 +247,16 @@ describe("a def named like a function of bend's runtime", () => {
     expect(dts).toContain("export declare function core(n: number): number;");
     const m = await import("./dist/runtime_names.mjs");
     expect(m.keywords(1, 2)).toBe(3);
+  });
+});
+
+describe("a module whose last function is a lifted closure", () => {
+  test("bend's `}export default {` is read, and the module runs", async () => {
+    const raw = bundle(fileURLToPath(new URL("./closure_last.bend", import.meta.url)));
+    expect(raw).toMatch(/^\}export default \{$/m);
+    const m = await import("./dist/closure_last.mjs");
+    const xs = (ns: number[]): any => ns.reduceRight((tail: any, head) => ({ $: "Con", head, tail }), { $: "Nil" });
+    expect([m.take(xs([2, 3, 4]), 5), m.take(xs([2, 3, 4]), 9), m.take(xs([]), 9)]).toEqual([2, 3, 0]);
   });
 });
 
