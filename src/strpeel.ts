@@ -1,18 +1,21 @@
 // strpeel.ts: carry a string that is only ever peeled at its head as (string, index).
 //
-// bend emits a match on SCon{c, t} over a string as
+// bend (2.0.38) emits a match on SCon{c, t} over a string as
 //
 //   if (S === "") {...} else {
-//     const C = (S.codePointAt(0) > 0xFFFF ? S.slice(0, 2) : S[0]);   // head
-//     const T = (S.codePointAt(0) > 0xFFFF ? S.slice(2) : S.slice(1)); // tail
+//     const C = S.slice(0, char_len(S));   // head
+//     const T = S.slice(char_len(S));      // tail
 //
+// where char_len(s, at = 0) is the runtime's length of the Char at `at`: 1 or 2
+// UTF-16 units for a code point, 4 for a packed non-scalar Char.
 // and the tail is a new string per character: O(n) allocations on an n-char
 // input. When a def only ever (1) tests S for "", (2) reads its head, and (3) hands
 // the tail to its own next loop step or to a def that itself only tests and reads
 // the head, the tail is never needed as a string. It is carried as an index: the
 // string parameter stays the same object, and a hidden trailing parameter `be$i<P>`
 // (default 0, so every outside caller is unchanged) says where the logical string
-// starts. Two shapes are handled:
+// starts, and the head and the step read char_len(S, i) there. Two shapes are
+// handled:
 //
 //   reader   function f(.., P, ..)  where every use of P is `P === ""` or the head
 //            expression. Gets a trailing `be$iP = 0`.
@@ -22,7 +25,10 @@
 //
 // Anything else is left as bend wrote it (the tail is materialised, as before),
 // and reported. The tail is never materialised behind the caller's back: if a
-// use is not one of the above, the whole parameter is left alone.
+// use is not one of the above, the whole parameter is left alone. The idioms are
+// the text this bend version emits: when they change, nothing matches and the
+// pass does nothing, so test/peel.bend holds both shapes and the gate fails then.
+// A module without the runtime's char_len(s, at) is left alone, and reported.
 
 import { close, occ, splitTop } from "./loops";
 
@@ -30,8 +36,11 @@ export interface Peeled { name: string; param: string; kind: "reader" | "walker"
 export interface Kept { name: string; param: string; reason: string }
 
 const esc = (s: string) => s.replace(/[$.*+?^{}()|[\]\\]/g, "\\$&");
-const headOf = (p: string) => `(${p}.codePointAt(0) > 0xFFFF ? ${p}.slice(0, 2) : ${p}[0])`;
-const tailOf = (p: string) => `(${p}.codePointAt(0) > 0xFFFF ? ${p}.slice(2) : ${p}.slice(1))`;
+const headOf = (p: string) => `${p}.slice(0, char_len(${p}))`;
+const tailOf = (p: string) => `${p}.slice(char_len(${p}))`;
+// the same, on the string that starts at index q of p
+const headAt = (p: string, q: string) => `${p}.slice(${q}, ${q} + char_len(${p}, ${q}))`;
+const nextAt = (p: string, q: string) => `${q} + char_len(${p}, ${q})`;
 const idRe = (n: string) => new RegExp("(?<![\\w$])" + esc(n) + "(?![\\w$])", "g");
 const ix = (n: string) => "be$i" + n;
 const count = (s: string, sub: string) => s.split(sub).length - 1;
@@ -47,6 +56,8 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
   const peeled: Peeled[] = [];
   const kept: Kept[] = [];
   const fnRe = /^function (\$[\w$]*)\(([^)]*)\) \{\n([\s\S]*?)\n\}$/gm;
+  const helper = /^function char_len\(s, at = 0\) \{$/m.test(js);
+  const noHelper = "the runtime's char_len(s, at) is not in the module";
 
   // pass 1: readers, and the def -> parameter positions they give
   const readers = new Map<string, number[]>();
@@ -60,9 +71,9 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       if (!p.startsWith("_")) return;
       const idioms = [`${p} === ""`, headOf(p)];
       if (count(body, headOf(p)) < 1 || stray(body, p, idioms) !== 0) return;
+      if (!helper) return void kept.push({ name, param: p, reason: noHelper });
       const q = ix(p);
-      b = b.split(`${p} === ""`).join(`${q} >= ${p}.length`)
-        .split(headOf(p)).join(`(${p}.codePointAt(${q}) > 0xFFFF ? ${p}.slice(${q}, ${q} + 2) : ${p}[${q}])`);
+      b = b.split(`${p} === ""`).join(`${q} >= ${p}.length`).split(headOf(p)).join(headAt(p, q));
       np.push(`${q} = 0`);
       pos.push(k);
       peeled.push({ name, param: p, kind: "reader" });
@@ -115,10 +126,11 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       const own = new RegExp("^\\s*" + esc(v) + " = " + esc(T) + ";$", "gm");
       const restNoOwn = rest.replace(own, "");
       if (occ(restNoOwn, T) !== 0) return fail("tail is used other than as the next step or a head-only reader's argument");
+      if (!helper) return fail(noHelper);
       // commit
       let r = b;
       r = r.replace(al[0], `${al[1]}const ${P} = ${v};\n${al[1]}const ${Pi} = ${vi};`);
-      r = r.replace(tm[0], `${tm[1]}const ${ix(T)} = ${Pi} + (${P}.codePointAt(${Pi}) > 0xFFFF ? 2 : 1);`);
+      r = r.replace(tm[0], `${tm[1]}const ${ix(T)} = ${nextAt(P, Pi)};`);
       // reader calls, on r
       for (const [f, pos] of readers) {
         const re = new RegExp("(?<![\\w$])" + esc(f) + "\\(", "g");
@@ -138,8 +150,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
       }
       r = r.replace(new RegExp("^(\\s*)" + esc(v) + " = ([^\\n]*);$", "gm"), (_w, ind: string, x: string) =>
         x === T ? `${ind}${vi} = ${ix(T)};` : `${ind}${v} = ${x}; ${vi} = 0;`);
-      r = r.split(`${P} === ""`).join(`${Pi} >= ${P}.length`)
-        .split(headOf(P)).join(`(${P}.codePointAt(${Pi}) > 0xFFFF ? ${P}.slice(${Pi}, ${Pi} + 2) : ${P}[${Pi}])`);
+      r = r.split(`${P} === ""`).join(`${Pi} >= ${P}.length`).split(headOf(P)).join(headAt(P, Pi));
       b = r;
       np.push(`${vi} = 0`);
       peeled.push({ name, param: v, kind: "walker" });

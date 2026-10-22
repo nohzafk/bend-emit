@@ -148,8 +148,9 @@ bend-emit applies these transformations:
   bend version produces; otherwise the def stays as bend wrote it and produces
   a `not made native: <name> (<why>)` diagnostic.
 - **String traversal:** replace eligible string-head/string-tail traversal
-  with an index into the original string. Code-point traversal still handles
-  surrogate pairs. Uses outside the recognized shapes remain unchanged and
+  with an index into the original string. Each step moves by one `Char`, as
+  bend's own does: a surrogate pair or a packed non-scalar `Char` is one step.
+  Uses outside the recognized shapes remain unchanged and
   produce a `string still sliced: ...` diagnostic.
 
 These passes recognize specific output shapes. They do not guarantee that
