@@ -29,6 +29,7 @@
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { loopify, type Stayed } from "./loops";
 import { lazySelect } from "./select";
 import { classify } from "./classes";
@@ -365,7 +366,7 @@ export function importPrefixes(path: string, seen = new Set<string>(), out = new
   return out;
 }
 
-type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; undeclared: string[] };
+type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; undeclared: string[] };
 
 // A file that holds laws or lemmas is built from a copy without them (see
 // laws.ts), and there a def with no TypeScript type is left out of the .d.mts
@@ -403,9 +404,10 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   const dts = declarations(modules(core), lib.filter(hostable), lenient ? undeclared : undefined);
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
-  // (Base's String comparison needs no native stand-in since bend 2.0.38: bend
-  // emits String.order as a loop, and its Char may be a packed non-scalar.)
-  const looped = loopify(lazySelect(bundle(core)).js);
+  // Base's String.order.go, which every String comparison goes through, gets a
+  // native equivalent first (see intrinsics.ts).
+  const intr = intrinsics(bundle(core));
+  const looped = loopify(lazySelect(intr.js).js);
   const peeled = peel(looped.js);
   const chunk = classify(peeled.js);
   const names = lib.map((d) => d.name);
@@ -434,7 +436,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, undeclared };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, undeclared };
 }
 
 if (import.meta.main) {
@@ -448,6 +450,7 @@ if (import.meta.main) {
     console.log(`wrote ${r.js} and ${r.dts}`);
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
     for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
+    for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$$/g, "")} (${s.reason})`);
     if (r.undeclared.length) console.log(`no TypeScript encoding, left out of the .d.mts: ${r.undeclared.join(", ")}`);
   } catch (e) {
     console.error((e as Error).message);

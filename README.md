@@ -140,6 +140,13 @@ bend-emit applies these transformations:
   `still recursive: <name> (<why>)` diagnostic.
 - **Zero-field constructors:** reuse singleton values rather than allocating
   a new object for each occurrence.
+- **String comparison:** replace Base's `String.order.go`, which every
+  `String.eq`, `String.order` and `String.is_*` calls, with a native loop that
+  returns the same `Cmp`: by `Char` code, then the shorter string first. bend's
+  own version slices both strings and allocates a `Cmp` at every character.
+  The replacement happens only when the emitted def is exactly the text this
+  bend version produces; otherwise the def stays as bend wrote it and produces
+  a `not made native: <name> (<why>)` diagnostic.
 - **String traversal:** replace eligible string-head/string-tail traversal
   with an index into the original string. Code-point traversal still handles
   surrogate pairs. Uses outside the recognized shapes remain unchanged and
