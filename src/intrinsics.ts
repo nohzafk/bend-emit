@@ -25,7 +25,7 @@
 export interface Native { name: string }
 export interface Skipped { name: string; reason: string }
 
-// The body bend 2.0.39 emits for Base's String.order.go, compared line by line
+// The body bend 2.0.40 emits for Base's String.order.go, compared line by line
 // with blanks trimmed.
 const ORDER_GO_EXPECTED = [
   "for (;;) {",
@@ -45,6 +45,7 @@ const ORDER_GO_EXPECTED = [
   "}",
   "} else {",
   "const _t_1 = _a_0.slice(0, char_len(_a_0));",
+  "const _x_0 = char_code(_t_1);",
   "const _t_2 = _a_0.slice(char_len(_a_0));",
   'if (_b_0 === "") {',
   'if (_c_0.$ === "EQ") {',
@@ -54,13 +55,12 @@ const ORDER_GO_EXPECTED = [
   "}",
   "} else {",
   "const _t_3 = _b_0.slice(0, char_len(_b_0));",
+  "const _y_0 = char_code(_t_3);",
   "const _t2_0 = _b_0.slice(char_len(_b_0));",
   'if (_c_0.$ === "EQ") {',
-  "const _x_0 = char_code(_t_1);",
-  "const _x_1 = char_code(_t_3);",
   "$0 = _t_2;",
   "$1 = _t2_0;",
-  "$2 = cmp_new(_x_0, _x_1);",
+  "$2 = cmp_new(_x_0, _y_0);",
   "continue;",
   "} else {",
   "return _c_0;",

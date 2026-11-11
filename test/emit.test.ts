@@ -250,10 +250,10 @@ describe("a def named like a function of bend's runtime", () => {
   });
 });
 
-describe("a module whose last function is a lifted closure", () => {
-  test("bend's `}export default {` is read, and the module runs", async () => {
+describe("a module whose export default is not on a line of its own", () => {
+  test("bend's `const $f = $f;export default {` is read, and the module runs", async () => {
     const raw = bundle(fileURLToPath(new URL("./closure_last.bend", import.meta.url)));
-    expect(raw).toMatch(/^\}export default \{$/m);
+    expect(raw).toMatch(/^const \$\$Nat_is_le = \$Nat_is_le;export default \{$/m);
     const m = await import("./dist/closure_last.mjs");
     const xs = (ns: number[]): any => ns.reduceRight((tail: any, head) => ({ $: "Con", head, tail }), { $: "Nil" });
     expect([m.take(xs([2, 3, 4]), 5), m.take(xs([2, 3, 4]), 9), m.take(xs([]), 9)]).toEqual([2, 3, 0]);

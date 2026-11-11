@@ -5,7 +5,7 @@ import { peel } from "../src/strpeel";
 import { first, nexts, tails } from "./dist/peel.mjs";
 import type { BendList } from "./dist/peel.mjs";
 
-// the text bend 2.0.39 emits for a string's head and tail, and its runtime's
+// the text bend 2.0.40 emits for a string's head and tail, and its runtime's
 // char_len: a packed non-scalar Char (U+DC00 and three units) is 4 units long
 const HEAD = (p: string) => `${p}.slice(0, char_len(${p}))`;
 const TAIL = (p: string) => `${p}.slice(char_len(${p}))`;

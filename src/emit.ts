@@ -30,6 +30,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { intrinsics, type Native, type Skipped } from "./intrinsics";
+import { entries, type Entry } from "./entries";
 import { loopify, type Stayed } from "./loops";
 import { lazySelect } from "./select";
 import { classify } from "./classes";
@@ -326,12 +327,13 @@ export function bundle(core: string): string {
 // def to `be$<i>`; bend never writes a name starting with `be$`, so they cannot
 // collide. Each def is exported under its own name.
 //
-// bend 2.0.39 writes the statement straight after the closing brace of the
-// module's last function when that function is a lifted closure, as
-// `}export default {` on one line (a def that passes a lambda, such as
-// `l => f(t, l)`, ends the module so). It is put on a line of its own first.
+// bend writes the statement straight after the module's last line of code,
+// with no line break: after the closing brace of a lifted closure, as
+// `}export default {` (a def that passes a lambda, such as `l => f(t, l)`,
+// ends the module so), or after the last `const $$f = ...;` entry that a
+// non-tail call goes through. It is put on a line of its own first.
 export function exportsOf(raw: string, names: string[]): string {
-  const chunk = raw.replace(/^\}export default \{$/m, "}\nexport default {");
+  const chunk = raw.replace(/^(.*[;}])export default \{$/m, "$1\nexport default {");
   const found = chunk.match(/^export /gm) ?? [];
   if (found.length !== 1) fail(`bend's module has ${found.length} exports, not one: ${found.join(", ")}`);
   if (!/^export default \{$/m.test(chunk)) fail("bend's module has no `export default {` of its own");
@@ -366,7 +368,7 @@ export function importPrefixes(path: string, seen = new Set<string>(), out = new
   return out;
 }
 
-type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; undeclared: string[] };
+type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; entered: Entry[]; undeclared: string[] };
 
 // A file that holds laws or lemmas is built from a copy without them (see
 // laws.ts), and there a def with no TypeScript type is left out of the .d.mts
@@ -405,8 +407,10 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
   // Base's String.order.go, which every String comparison goes through, gets a
-  // native equivalent first (see intrinsics.ts).
-  const intr = intrinsics(bundle(core));
+  // native equivalent (see intrinsics.ts). Before any of them, each call through
+  // a `$f` entry is written back as a direct call (see entries.ts).
+  const ent = entries(bundle(core));
+  const intr = intrinsics(ent.js);
   const looped = loopify(lazySelect(intr.js).js);
   const peeled = peel(looped.js);
   const chunk = classify(peeled.js);
@@ -436,7 +440,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
     fail(`the source's defs and the module's exports differ:\n  source: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, undeclared };
+  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, entered: ent.kept, undeclared };
 }
 
 if (import.meta.main) {
@@ -450,7 +454,8 @@ if (import.meta.main) {
     console.log(`wrote ${r.js} and ${r.dts}`);
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
     for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
-    for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$$/g, "")} (${s.reason})`);
+    for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$/g, "")} (${s.reason})`);
+    for (const e of r.entered) console.log(`call kept through an entry: ${e.name.replace(/^\$+/, "")} (${e.reason})`);
     if (r.undeclared.length) console.log(`no TypeScript encoding, left out of the .d.mts: ${r.undeclared.join(", ")}`);
   } catch (e) {
     console.error((e as Error).message);

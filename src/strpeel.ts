@@ -1,6 +1,6 @@
 // strpeel.ts: carry a string that is only ever peeled at its head as (string, index).
 //
-// bend (2.0.39) emits a match on SCon{c, t} over a string as
+// bend (2.0.40) emits a match on SCon{c, t} over a string as
 //
 //   if (S === "") {...} else {
 //     const C = S.slice(0, char_len(S));   // head

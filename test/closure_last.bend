@@ -1,8 +1,10 @@
 import Base
 
-# A def that passes a lambda: bend lifts the lambda into a function written
-# last in the module, and 2.0.39 closes that function with
-# `}export default {` on one line. The module must still be read and load.
+# A def that passes a lambda, and a non-tail call to a def (Nat.is_le): bend
+# writes the call's `const $Nat_is_le = $Nat_is_le;` entry last in the
+# module, and `export default {` straight after it on the same line. Without
+# the entry, the lifted lambda comes last and its closing brace takes that
+# place: `}export default {`. The module must still be read and load.
 
 # Count it when it fits, and walk on with what is left.
 def take.fit(fits: Bool, next: Nat -> Nat, +left: Nat) -> Nat:

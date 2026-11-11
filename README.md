@@ -9,7 +9,7 @@ optimizations to Bend's JavaScript output.
 
 ## Quick Start
 
-Install **Bend 2.0.39** and **Bun**, with both `bend` and `bun` on PATH.
+Install **Bend 2.0.40** and **Bun**, with both `bend` and `bun` on PATH.
 The commands below also require Node.js and npm for `npx`.
 Installing this npm package does not install Bend or Bun.
 
@@ -114,6 +114,14 @@ The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `
 The generated module is not byte-for-byte identical to Bend's output.
 bend-emit applies these transformations:
 
+- **Direct calls:** bend writes a call that is not in tail position through an
+  entry, `$f(args)`, defined after every function as `const $f = $f;` (or,
+  for a def that ends in a jump, a function that runs the jump loop). Each such
+  call is written back as a call of the def itself, `($f(args))` or
+  `run_loop($f(args))`, and the entry is removed once nothing uses it, so
+  the passes below see a def's self-calls under its own name. An entry of
+  another shape, or one used other than as a callee, stays and produces a
+  `call kept through an entry: <name> (<why>)` diagnostic.
 - **Lazy selectors:** bend evaluates call arguments eagerly, so
   `pick(c, f(x), g(y))` runs both `f` and `g`. A def whose emitted body is
   exactly `if (b) return p; else return q` over its own parameters (in Bend: a
@@ -194,7 +202,7 @@ Template definitions are not exported by Bend's ES-module target.
 
 ## Toolchain Requirements
 
-The build tool requires Bun and **exactly Bend 2.0.39**, the version recorded
+The build tool requires Bun and **exactly Bend 2.0.40**, the version recorded
 in `BEND_VERSION`. Another Bend version is rejected before compilation.
 
 The emitter reads and transforms compiler output, so a different compiler
