@@ -158,7 +158,8 @@ bend-emit applies these transformations:
 - **String traversal:** replace eligible string-head/string-tail traversal
   with an index into the original string. Each step moves by one `Char`, as
   bend's own does: a surrogate pair or a packed non-scalar `Char` is one step.
-  Uses outside the recognized shapes remain unchanged and
+  A UTF-16 unit that is not a surrogate is read as one `Char` directly; only a
+  surrogate goes through the runtime's `char_len`. Uses outside the recognized shapes remain unchanged and
   produce a `string still sliced: ...` diagnostic.
 
 These passes recognize specific output shapes. They do not guarantee that

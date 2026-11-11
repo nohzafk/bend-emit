@@ -14,8 +14,7 @@
 // the head, the tail is never needed as a string. It is carried as an index: the
 // string parameter stays the same object, and a hidden trailing parameter `be$i<P>`
 // (default 0, so every outside caller is unchanged) says where the logical string
-// starts, and the head and the step read char_len(S, i) there. Two shapes are
-// handled:
+// starts, and the head and the step are read there. Two shapes are handled:
 //
 //   reader   function f(.., P, ..)  where every use of P is `P === ""` or the head
 //            expression. Gets a trailing `be$iP = 0`.
@@ -29,6 +28,12 @@
 // the text this bend version emits: when they change, nothing matches and the
 // pass does nothing, so test/peel.bend holds both shapes and the gate fails then.
 // A module without the runtime's char_len(s, at) is left alone, and reported.
+//
+// The head and the step at i go through two helpers the pass adds after the
+// runtime's char_len, be$head(S, i) and be$next(S, i). A UTF-16 unit that is not
+// a surrogate is a whole Char, so they read it without calling char_len; a
+// surrogate (an astral pair, a lone surrogate, or the U+DC00 of a packed Char)
+// goes to char_len(S, i) as before. bend never writes a name starting with be$.
 
 import { close, occ, splitTop } from "./loops";
 
@@ -39,8 +44,22 @@ const esc = (s: string) => s.replace(/[$.*+?^{}()|[\]\\]/g, "\\$&");
 const headOf = (p: string) => `${p}.slice(0, char_len(${p}))`;
 const tailOf = (p: string) => `${p}.slice(char_len(${p}))`;
 // the same, on the string that starts at index q of p
-const headAt = (p: string, q: string) => `${p}.slice(${q}, ${q} + char_len(${p}, ${q}))`;
-const nextAt = (p: string, q: string) => `${q} + char_len(${p}, ${q})`;
+const headAt = (p: string, q: string) => `be$head(${p}, ${q})`;
+const nextAt = (p: string, q: string) => `be$next(${p}, ${q})`;
+
+const HELPERS = [
+  "function be$head(be$s, be$i) {",
+  "  // bend-emit: the Char at index be$i of be$s; a unit that is not a surrogate is one.",
+  "  const be$c = be$s.charCodeAt(be$i);",
+  "  return be$c < 0xD800 || be$c >= 0xE000 ? be$s[be$i] : be$s.slice(be$i, be$i + char_len(be$s, be$i));",
+  "}",
+  "",
+  "function be$next(be$s, be$i) {",
+  "  // bend-emit: the index after the Char at index be$i of be$s.",
+  "  const be$c = be$s.charCodeAt(be$i);",
+  "  return be$c < 0xD800 || be$c >= 0xE000 ? be$i + 1 : be$i + char_len(be$s, be$i);",
+  "}",
+].join("\n");
 const idRe = (n: string) => new RegExp("(?<![\\w$])" + esc(n) + "(?![\\w$])", "g");
 const ix = (n: string) => "be$i" + n;
 const count = (s: string, sub: string) => s.split(sub).length - 1;
@@ -158,5 +177,7 @@ export function peel(js: string): { js: string; peeled: Peeled[]; kept: Kept[] }
     if (np.length === params.length) return whole;
     return `function ${name}(${np.join(", ")}) {\n${b}\n}`;
   });
+  // the helpers go after the runtime's char_len, which every peeled def needs
+  if (peeled.length) out = out.replace(/^function char_len\(s, at = 0\) \{\n[\s\S]*?\n\}$/m, (f) => `${f}\n\n${HELPERS}`);
   return { js: out, peeled, kept };
 }

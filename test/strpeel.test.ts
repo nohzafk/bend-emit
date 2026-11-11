@@ -49,6 +49,10 @@ test("a head-only walk carries an index and never slices the tail", () => {
   expect(r.peeled.map((p) => p.kind).sort()).toEqual(["reader", "walker"]);
   expect(r.js).not.toContain(".slice(char_len(");
   expect(r.js).not.toContain(", char_len(_s_0))");
+  // head and step go through the helpers, added once, right after char_len
+  expect(r.js.match(/^function be\$(head|next)\(/gm)).toEqual(["function be$head(", "function be$next("]);
+  expect(r.js.indexOf("function be$head(")).toBeGreaterThan(r.js.indexOf("function char_len("));
+  expect(r.js).toContain("const be$i_t_0 = be$next(_s_0, be$i_s_0);");
   const run = (js: string, s: string) => new Function(js + "; return [$go$($0s, 0, \"\"), $cls$];".replace("$0s", JSON.stringify(s)))();
   // same value as bend's own emission, on ascii, astral, packed and empty input
   const packed = "\uDC00\u0001\u0002\u0003";
@@ -57,6 +61,13 @@ test("a head-only walk carries an index and never slices the tail", () => {
   }
   // the parameter a caller passes is still a plain string: the default index is 0
   expect(new Function(r.js + "; return $cls$(\"😀x\");")()).toBe(2);
+});
+
+test("a def with nothing to peel gets no helpers", () => {
+  const src = RUNTIME + "\n\n" + walker("_acc_0 + _t_0").replace(/\$cls\$\(_t_0\)/, "1");
+  const r = peel(src);
+  expect(r.peeled).toEqual([]);
+  expect(r.js).toBe(src);
 });
 
 test("the input is never copied: a 200k-char walk keeps the one string", () => {
@@ -107,6 +118,8 @@ test("bend's own head-only walk and reader, built: both carry an index, and a ke
   expect(fnText(js, "$first")).toStartWith("function $first(_s_0, be$i_s_0 = 0) {");
   expect(fnText(js, "$nexts")).toStartWith("function $nexts($0, $1, be$i$0 = 0) {");
   for (const f of ["$first", "$nexts"]) expect(fnText(js, f)).not.toContain(".slice(char_len(");
+  expect(fnText(js, "$first")).toContain("be$head(_s_0, be$i_s_0)");
+  expect(fnText(js, "$nexts")).toContain("be$next(_s_0, be$i_s_0)");
   expect(fnText(js, "$tails")).toStartWith("function $tails($0, $1) {");
   expect(fnText(js, "$tails")).toContain(".slice(char_len(_s_0))");
 });
