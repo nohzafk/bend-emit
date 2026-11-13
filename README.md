@@ -145,59 +145,28 @@ The types say less than Bend does, and a host must keep the rest:
 ### Runtime Transformations
 
 The generated module is not byte-for-byte identical to Bend's output.
-bend-emit applies these transformations:
+bend-emit rewrites a few shapes of Bend's JavaScript that cost stack or
+allocation at scale:
 
-- **Direct calls:** bend writes a call that is not in tail position through an
-  entry, `$f(args)`, defined after every function as `const $f = $f;` (or,
-  for a def that ends in a jump, a function that runs the jump loop). Each such
-  call is written back as a call of the def itself, `($f(args))` or
-  `run_loop($f(args))`, and the entry is removed once nothing uses it, so
-  the passes below see a def's self-calls under its own name. An entry of
-  another shape, or one used other than as a callee, stays and produces a
-  `call kept through an entry: <name> (<why>)` diagnostic.
-- **Lazy selectors:** bend evaluates call arguments eagerly, so
-  `pick(c, f(x), g(y))` runs both `f` and `g`. A def whose emitted body is
-  exactly `if (b) return p; else return q` over its own parameters (in Bend: a
-  match on one Bool parameter whose arms each return a parameter unchanged;
-  `-A` and `+`/`-` marks are irrelevant) is a selector, wherever it is defined
-  in the bundled core, imported or not. A call that is all of a `return`
-  becomes `if (b) { return X; } else { return Y; }`, so only the chosen
-  argument runs and a self-call stays at the end of its branch for the loop
-  pass below. Elsewhere the call becomes `(b ? X : Y)`, unless X or Y call the
-  enclosing def (that call stays eager). The selector def stays exported.
-- **Recursive list traversal:** turn recursion on the tail of a list into a
-  loop. In a `return` expression with self-calls, the self-call evaluated
-  last (the "hole") is replaced by a loop step: what is evaluated before it
-  is evaluated first, in the same order; what follows it is pushed on a
-  per-call stack as a closure; the parameters are rebound to the hole's
-  arguments. Each other `return` folds the stack. This covers
-  `Con{head: f(x), tail: f(t)}`, `and(f(h), f(t))`, `n + f(t)`, `pick(c, v, f(t))`
-  and a self-call bound in a `const` just before the `return`, also inside
-  bend's own `for (;;)` loops. It reads shapes only and knows no names.
-  Self-calls other than the hole (the head, a nested child) stay real calls,
-  so nesting depth is still bounded by the stack. A def whose self-call is
-  under `||`, `&&` or `?:`, is not at the end of its branch, or uses its own
-  name as a value stays unchanged and produces a
-  `still recursive: <name> (<why>)` diagnostic.
-- **Zero-field constructors:** reuse singleton values rather than allocating
-  a new object for each occurrence.
-- **String comparison:** replace Base's `String.order.go`, which every
-  `String.eq`, `String.order` and `String.is_*` calls, with a native loop that
-  returns the same `Cmp`: by `Char` code, then the shorter string first. bend's
-  own version slices both strings and allocates a `Cmp` at every character.
-  The replacement happens only when the emitted def is exactly the text this
-  bend version produces; otherwise the def stays as bend wrote it and produces
-  a `not made native: <name> (<why>)` diagnostic.
-- **String traversal:** replace eligible string-head/string-tail traversal
-  with an index into the original string. Each step moves by one `Char`, as
-  bend's own does: a surrogate pair or a packed non-scalar `Char` is one step.
-  A UTF-16 unit that is not a surrogate is read as one `Char` directly; only a
-  surrogate goes through the runtime's `char_len`. Uses outside the recognized shapes remain unchanged and
-  produce a `string still sliced: ...` diagnostic.
+- **Direct calls:** a call through Bend's `$$f` entry is written back as a
+  direct call, so the passes below see a def's self-calls.
+- **Lazy selectors:** a call to a def that only picks one of two parameters
+  by a `Bool` runs only the chosen argument.
+- **Recursion to loops:** the self-call evaluated last in a `return` becomes
+  a loop step, with the rest of the expression kept on a heap stack.
+- **Native string comparison:** Base's `String.order.go` becomes a native
+  loop that returns the same `Cmp`.
+- **String walks by index:** a string that a def only peels at its head is
+  carried as the same string and an index, not a new tail per character.
+- **Shared nullary constructors:** a constructor with no fields is one shared
+  value, so two such values are `===`.
 
-These passes recognize specific output shapes. They do not guarantee that
-all recursion becomes stack-safe or that every core uses less memory.
-Review the diagnostics and measure your own workload.
+Each pass matches the exact text Bend 2.0.40 writes. Where the shape is not
+there, the code stays as Bend wrote it, and the command prints a diagnostic
+(`still recursive:`, `string still sliced:`, `not made native:`,
+`call kept through an entry:`). The passes do not make every recursion
+stack-safe or every core smaller. Review the diagnostics and measure your own
+workload.
 
 ### Laws and Facts Files
 
@@ -234,6 +203,19 @@ Where Bend includes such a definition in its emitted module, bend-emit does
 not remove it. The absence of a declaration is not a supported typed API.
 Template definitions are not exported by Bend's ES-module target.
 
+## Tested on BendHub
+
+With Bend 2.0.40, bend-emit builds all 115 pure BendHub packages that Bend
+itself compiles, and every generated `.d.mts` typechecks under `strict`.
+Across those packages, 17,656 calls of their exported defs gave the same
+result before and after bend-emit's passes. On
+[bend-csv](https://github.com/nohzafk/bend-csv)'s benchmark, a 10 MB parse
+takes 234 ms, against 318 ms for Deno's `@std/csv`.
+
+How bend-emit reads the core, how each type is encoded, what each pass
+rewrites, and how all this is checked: see the
+[technical reference](docs/techniques.md).
+
 ## Toolchain Requirements
 
 The build tool requires Bun. It runs **exactly Bend 2.0.40**, the version
@@ -254,9 +236,11 @@ sh test.sh
 ```
 
 The gate first puts Bend's source in `bend2/` (`sh tools/bend-src`, which
-`npm pack` also runs). It takes the source from `$BEND_SRC`, else
-`~/projects/.toolchains/bend-src-<version>`, else a Bend checkout at
-`~/projects/bend` at tag `v<version>`. `bend2/` is not committed. The gate
+`npm pack` also runs, with `--tag`). It takes the source from `$BEND_SRC`,
+else a Bend checkout at `~/projects/bend` at tag `v<version>`, else
+`~/projects/.toolchains/bend-src-<version>`. From a checkout it reads the files
+of the tag; `--tag` refuses a source tree that is not a checkout. `bend2/` is
+not committed. The gate
 also checks its fixture cores with the `bend` command of that version.
 
 The gate builds fixture cores, checks runtime values and declarations,
