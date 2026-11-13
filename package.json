@@ -13,8 +13,12 @@
   "bin": {
     "bend-emit": "src/cli.js"
   },
+  "scripts": {
+    "prepack": "sh tools/bend-src --tag"
+  },
   "files": [
     "src/",
+    "bend2/",
     "BEND_VERSION",
     "LICENSE",
     "README.md"

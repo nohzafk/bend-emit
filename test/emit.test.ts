@@ -2,10 +2,13 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { build, bundle, declarations, importPrefixes, importsOf, modules, readDecls } from "../src/emit";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { build, bundle } from "../src/emit";
+import { arities, declarations, exported, load, prefixes } from "../src/book";
+import * as Bend from "../bend2/bend.ts";
+import * as Comp from "../bend2/comp.ts";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { first_big, side, sum_or_err, unit, unwrap, type BendList } from "./dist/generics.mjs";
 import { first_or_none, wrap } from "./dist/uses.mjs";
@@ -16,38 +19,60 @@ function list<T>(xs: T[]): BendList<T> {
   return xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
 }
 
+// Files in a fresh directory, by relative path; the path of core.bend.
+function files(fs: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "bend-emit-core-"));
+  for (const [p, text] of Object.entries(fs)) {
+    mkdirSync(dirname(join(dir, p)), { recursive: true });
+    writeFileSync(join(dir, p), text);
+  }
+  return join(dir, "core.bend");
+}
+
+// The .d.mts for a core, read from its checked Book. A ?TODO body checks at
+// any type, so a test states a signature without a body; the build itself
+// refuses a TODO.
+async function dtsOf(core: string): Promise<string> {
+  const book = Bend.book_nil();
+  await Bend.book_load(book, core, "", new Map());
+  Bend.book_valid(book, 0);
+  const l = { B: Bend, book };
+  return declarations(l, core, exported(l), arities(Comp.js_lib(book, true)));
+}
+
 // The signature the tool writes for a one-def source.
-function sig(header: string): string {
-  const { datas, defs } = readDecls(`type Err is Data:\n  Empty{}\n\n${header}\n  x\n`);
-  const scope = new Map(datas.map((d) => [d.name, d.name] as [string, string]));
-  return declarations([{ prefix: "", datas, scope }], defs).split("\n").find((l) => l.startsWith("export declare function"))!;
+async function sig(header: string): Promise<string> {
+  const dts = await dtsOf(files({ "core.bend": `import Base\n\ntype Err is Data:\n  Empty{}\n\n${header}\n  ?TODO\n` }));
+  return dts.split("\n").find((l) => l.startsWith("export declare function"))!;
 }
 
 describe("the .d.mts", () => {
-  test("each generic maps to its TypeScript type, nested too", () => {
-    expect(sig("def f(m: Maybe<&2, Nat>) -> Maybe<Nat>:")).toBe("export declare function f(m: BendMaybe<number>): BendMaybe<number>;");
-    expect(sig("def f(r: Result<&2, &2, Err, List<&2, Nat>>) -> Unit:")).toBe(
+  test("each generic maps to its TypeScript type, nested too", async () => {
+    expect(await sig("def f(m: Maybe<&2, Nat>) -> Maybe<Nat>:")).toBe("export declare function f(m: BendMaybe<number>): BendMaybe<number>;");
+    expect(await sig("def f(r: Result<&2, &2, Err, List<&2, Nat>>) -> Unit:")).toBe(
       "export declare function f(r: BendResult<Err, BendList<number>>): BendUnit;",
     );
-    expect(sig("def f(e: Either<Nat, Bool>) -> List<Maybe<Nat>>:")).toBe(
+    expect(await sig("def f(e: Either<Nat, Bool>) -> List<Maybe<Nat>>:")).toBe(
       "export declare function f(e: BendEither<number, boolean>): BendList<BendMaybe<number>>;",
     );
-    expect(sig("def f(m: Map<&2, Nat>) -> Map<Nat>:")).toBe(
+    expect(await sig("def f(m: Map<&2, Nat>) -> Map<Nat>:")).toBe(
       "export declare function f(m: BendMap<number>): BendMap<number>;",
     );
   });
 
-  test("a use with the wrong number of quantities or types is refused", () => {
-    expect(() => sig("def f(m: Maybe<&2, &2, Nat>) -> Nat:")).toThrow("Maybe takes 1 type(s)");
-    expect(() => sig("def f(r: Result<&2, Err, Nat>) -> Nat:")).toThrow("Result takes 2 type(s)");
-    expect(() => sig("def f(r: Result<Nat>) -> Nat:")).toThrow("Result takes 2 type(s)");
-    expect(() => sig("def f(l: List<Nat, &2>) -> Nat:")).toThrow("List takes 1 type(s)");
-    expect(() => sig("def f(m: Map<&2, &2, Nat>) -> Nat:")).toThrow("Map takes 1 type(s)");
-    expect(() => sig("def f(m: Map<Nat, Bool>) -> Nat:")).toThrow("Map takes 1 type(s)");
+  test("a use with the wrong number of types is bend's to refuse", async () => {
+    const core = files({ "core.bend": "import Base\n\ndef f(m: Maybe<&2, Nat, Nat>) -> Nat:\n  0n\n" });
+    expect(load(core)).rejects.toThrow("bend could not compile");
   });
 
-  test("a generic the tool has no encoding for is refused, by name", () => {
-    expect(() => sig("def f(m: Unsupported<&2, Nat>) -> Nat:")).toThrow("generic Bend type Unsupported");
+  test("a Base type the tool has no encoding for is refused, by name", async () => {
+    expect(sig("def f(a: Array<Nat>) -> Nat:")).rejects.toThrow("def f: no TypeScript encoding for the Bend type Array");
+  });
+
+  test("a function parameter, of one or of two arguments", async () => {
+    expect(await sig("def f(g: Nat -> Bool, h: Nat -> Nat -> String) -> Nat:")).toBe(
+      "export declare function f(g: ((x: number) => boolean), h: ((x: number) => ((x: number) => string))): number;",
+    );
   });
 });
 
@@ -152,13 +177,6 @@ describe("a core that reaches a file only through another import", () => {
 });
 
 describe("a def with a template parameter", () => {
-  test("readDecls reads the def, and its ~ parameter survives", () => {
-    const { defs } = readDecls("def pick(~f: Nat -> Bool, n: Nat) -> Bool:\n  f(n)\n");
-    const d = defs.find((x) => x.name === "pick");
-    expect(d).toBeDefined();
-    expect(d!.params.map(([n]) => n)).toContain("~f");
-  });
-
   test("the tool skips it: not declared in the .d.mts, module still imports", async () => {
     const dts = readFileSync(new URL("./dist/templated.d.mts", import.meta.url), "utf8");
     expect(dts).not.toContain("export declare function pick");
@@ -193,22 +211,23 @@ describe("generic data, and types that depend on a value", () => {
     expect(dts).toContain("export declare function one(): number;");
   });
 
-  test("a type parameter of a kind other than Data is refused, by name", () => {
-    expect(() => readDecls("type F<T: Type> is Data:\n  F{x: T}\n")).toThrow("type F: a type parameter of kind Type");
+  test("a type parameter of kind Type is declared; one of kind Nat is refused, by name", async () => {
+    const box = await dtsOf(files({ "core.bend": "import Base\n\ntype Box<T: Type> is Type:\n  Box{x: T}\n" }));
+    expect(box).toContain('export type Box<T> = { $: "Box"; "x": T };');
+    const vec = files({ "core.bend": "import Base\n\ntype Vec<-n: Nat> is Data:\n  Vec{x: Nat}\n" });
+    expect(dtsOf(vec)).rejects.toThrow("type Vec: a type parameter of kind Nat");
   });
 });
 
 describe("Char, and a type body with comments and blank lines", () => {
-  test("a Char crosses as a one-code-point string, both ways", () => {
-    expect(sig("def f(c: Char) -> Char:")).toBe("export declare function f(c: string): string;");
+  test("a Char crosses as a one-code-point string, both ways", async () => {
+    expect(await sig("def f(c: Char) -> Char:")).toBe("export declare function f(c: string): string;");
     expect(double("é", "x")).toBe("ééx");
     expect(double("😀", "")).toBe("😀😀");
     expect(code_of({ $: "Other", c: "😀" })).toBe(0x1f600);
   });
 
-  test("every constructor is read, past a comment and a blank line", () => {
-    const { datas } = readDecls(readFileSync(new URL("./chars.bend", import.meta.url), "utf8"));
-    expect(datas.find((d) => d.name === "Sort")!.ctors.map((c) => c.name)).toEqual(["Other", "Quote", "Sep"]);
+  test("every constructor is declared, past a comment and a blank line", () => {
     const dts = readFileSync(new URL("./dist/chars.d.mts", import.meta.url), "utf8");
     expect(dts).toContain('export type Sort = { $: "Other"; "c": string } | { $: "Quote" } | { $: "Sep" };');
     expect(kind("\"")).toEqual({ $: "Quote" });
@@ -252,7 +271,7 @@ describe("a def named like a function of bend's runtime", () => {
 
 describe("a module whose export default is not on a line of its own", () => {
   test("bend's `const $f = $f;export default {` is read, and the module runs", async () => {
-    const raw = bundle(fileURLToPath(new URL("./closure_last.bend", import.meta.url)));
+    const raw = await bundle(fileURLToPath(new URL("./closure_last.bend", import.meta.url)));
     expect(raw).toMatch(/^const \$\$Nat_is_le = \$Nat_is_le;export default \{$/m);
     const m = await import("./dist/closure_last.mjs");
     const xs = (ns: number[]): any => ns.reduceRight((tail: any, head) => ({ $: "Con", head, tail }), { $: "Nil" });
@@ -261,107 +280,139 @@ describe("a module whose export default is not on a line of its own", () => {
 });
 
 describe("a data type named like a type of the preamble", () => {
-  test("is refused, with the reserved names", () => {
-    const src = "import Base\n\ntype BendList is Data:\n  Own{}\n\ndef identity(x: BendList) -> BendList:\n  x\n";
-    const { datas } = readDecls(src);
-    const mod = { prefix: "", datas, scope: new Map(datas.map((d) => [d.name, d.name])) };
-    expect(() => declarations([mod], [])).toThrow("type BendList: the name of a type bend-emit declares for Base");
+  test("is refused, with the reserved names", async () => {
+    const core = files({ "core.bend": "import Base\n\ntype BendList is Data:\n  Own{}\n\ndef identity(x: BendList) -> BendList:\n  x\n" });
+    expect(dtsOf(core)).rejects.toThrow("type BendList of the core: the name of a type bend-emit declares for Base");
   });
 });
 
 describe("an imported data type whose TypeScript name is another type's", () => {
-  const mod = (prefix: string, names: string[]) => {
-    const { datas } = readDecls(names.map((n) => `type ${n} is Data:\n  Own{}\n`).join("\n"));
-    return { prefix, datas, scope: new Map(datas.map((d) => [d.name, prefix + d.name])) };
-  };
-  test("a local type and an import's type are refused, naming both", () => {
-    expect(() => declarations([mod("", ["G_Err"]), mod("G_", ["Err"])], [])).toThrow("two types would both be written G_Err: type G_Err of the core and type Err imported as G");
-    expect(() => declarations([mod("", ["G_Err"]), mod("G_", ["Err"])], [])).toThrow("type G_Err");
+  const own = (names: string[]) => names.map((n) => `type ${n} is Data:\n  ${n}.Own{}\n`).join("\n");
+  test("a local type and an import's type are refused, naming both", async () => {
+    const core = files({ "core.bend": `import Base\nimport ./g.bend as G\n\n${own(["G_Err"])}`, "g.bend": `import Base\n\n${own(["Err"])}` });
+    expect(dtsOf(core)).rejects.toThrow("two types would both be written G_Err: type G_Err of the core and type Err imported as G");
   });
-  test("two imports' types are refused", () => {
-    expect(() => declarations([mod("", []), mod("a_b_", ["T"]), mod("a_", ["b_T"])], [])).toThrow("two types would both be written a_b_T: type T imported as a_b and type b_T imported as a");
+  test("two imports' types are refused", async () => {
+    const core = files({
+      "core.bend": "import Base\nimport ./a.bend as a\n",
+      "a.bend": `import Base\nimport ./b.bend as b\n\n${own(["b_T"])}`,
+      "b.bend": `import Base\n\n${own(["T"])}`,
+    });
+    expect(dtsOf(core)).rejects.toThrow("two types would both be written a_b_T");
   });
-  test("distinct names pass", () => {
-    expect(declarations([mod("", ["A"]), mod("G_", ["Err"])], [])).toContain("export type G_Err");
+  test("distinct names pass", async () => {
+    const core = files({ "core.bend": `import Base\nimport ./g.bend as G\n\n${own(["A"])}`, "g.bend": `import Base\n\n${own(["Err"])}` });
+    expect(await dtsOf(core)).toContain("export type G_Err");
+  });
+  test("a file reached two ways is declared once, and its other name is an alias", async () => {
+    const core = files({
+      "core.bend": "import Base\nimport ./g.bend as G\nimport ./h.bend as H\n",
+      "h.bend": "import Base\nimport ./g.bend as G\n",
+      "g.bend": `import Base\n\n${own(["Err"])}`,
+    });
+    const dts = await dtsOf(core);
+    expect(dts).toContain('export type G_Err = { $: "Err.Own" };');
+    expect(dts).toContain("export type H_G_Err = G_Err;");
   });
 });
 
 describe("source as hub packages write it", () => {
-  // The first data type and the first def of a source, as read.
-  const one = (src: string) => readDecls(src);
-
-  test("a def header over several lines, its ) at the margin, with a trailing comment", () => {
-    const { defs } = one("def f(\n  a: Nat,\n  +b: List<&2, Nat>,\n) ->\n  Nat:  # noqa: L001\n  a\n");
-    expect(defs).toEqual([{ name: "f", params: [["a", "Nat"], ["b", "List<&2, Nat>"]], ret: "Nat", erased: false }]);
-    expect(sig("def f(\n  a: Nat,\n  b: Bool\n) -> Nat:")).toBe("export declare function f(a: number, b: boolean): number;");
+  test("a def header over several lines, with a trailing comment", async () => {
+    expect(await sig("def f(\n  a: Nat,\n  +b: List<&2, Nat>,\n) ->\n  Nat:  # noqa: L001")).toBe(
+      "export declare function f(a: number, b: BendList<number>): number;",
+    );
   });
 
-  test("a constructor over several lines, its fields split by commas or by line breaks", () => {
-    const { datas } = one("type T is Data:\n  A{x: Nat,\n    y: String}\n  B{\n    x: List<&2, Nat>\n    y: Bool\n  }\n");
-    expect(datas[0].ctors).toEqual([
-      { name: "A", fields: [["x", "Nat"], ["y", "String"]] },
-      { name: "B", fields: [["x", "List<&2, Nat>"], ["y", "Bool"]] },
-    ]);
-  });
-
-  test("a def body that looks like a constructor is not joined to what follows", () => {
-    const { datas, defs } = one("def f(a: Nat, b: Nat) -> Bool:\n  Foo{a < b}\n\ntype T is Data:\n  T{}\n\ndef g() -> Nat:\n  0n\n");
-    expect(datas.map((d) => d.name)).toEqual(["T"]);
-    expect(defs.map((d) => d.name)).toEqual(["f", "g"]);
-  });
-
-  test("is Type, a + before a field's type, marked and long type parameters, dotted names", () => {
-    const { datas } = one("type Box<-KE: Data> is Type:\n  Box.Full{xs: +List<KE>}\n  Box.None{}\n\ntype Parse.Cur is Data:\n  Cur{at: Nat}\n");
-    expect(datas[0]).toEqual({ name: "Box", tparams: ["KE"], ctors: [{ name: "Box.Full", fields: [["xs", "+List<KE>"]] }, { name: "Box.None", fields: [] }] });
-    const scope = new Map(datas.map((d) => [d.name, d.name.replace(/\./g, "_")] as [string, string]));
-    const dts = declarations([{ prefix: "", datas, scope }], []);
+  test("is Type, a + before a field's type, marked type parameters, dotted names", async () => {
+    const dts = await dtsOf(files({ "core.bend": "import Base\n\ntype Box<-KE: Data> is Type:\n  Box.Full{xs: +List<KE>}\n  Box.None{}\n\ntype Parse.Cur is Data:\n  Cur{at: Nat}\n" }));
     expect(dts).toContain('export type Box<KE> = { $: "Box.Full"; "xs": BendList<KE> } | { $: "Box.None" };');
     expect(dts).toContain('export type Parse_Cur = { $: "Cur"; "at": number };');
   });
 
-  test("a def after its law (bare names, no ->) is a proof, not read; a bare name is a quantity", () => {
-    const { defs } = one("def Laws.round_trip(v):\n  {==}\n\ndef k(a, -A: Kind(a), n: Nat) -> Nat:\n  n\n\ndef io?(n: Nat) -> IO(Unit):\n  IO.print(\"\")\n");
-    expect(defs.map((d) => [d.name, d.erased])).toEqual([["k", true], ["io", false]]);
+  test("a def with an erased quantity or type parameter is not declared", async () => {
+    const dts = await dtsOf(files({ "core.bend": "import Base\n\ndef k(a, -A: Kind(a), n: Nat) -> Nat:\n  n\n\ndef m(n: Nat) -> Nat:\n  n\n" }));
+    expect(dts).not.toContain("function k(");
+    expect(dts).toContain("export declare function m(n: number): number;");
   });
 
-  test("F32, Cmp, and the pair A & B, parenthesized or not", () => {
-    expect(sig("def f(x: F32, c: Cmp) -> Nat & (Bool & String):")).toBe(
+  test("F32, Cmp, and the pair A & B, parenthesized or not", async () => {
+    expect(await sig("def f(x: F32, c: Cmp) -> Nat & (Bool & String):")).toBe(
       "export declare function f(x: number, c: BendCmp): BendPair<number, BendPair<boolean, string>>;",
     );
-    expect(sig("def f(p: List<&2, String & Nat>) -> (Nat & Nat) -> Nat:")).toBe(
-      "export declare function f(p: BendList<BendPair<string, number>>): ((x: BendPair<number, number>) => number);",
+    expect(await sig("def f(p: List<&2, +Sigma<String, _ => Nat>>, g: (Nat & Nat) -> Nat) -> Nat:")).toBe(
+      "export declare function f(p: BendList<BendPair<string, number>>, g: ((x: BendPair<number, number>) => number)): number;",
     );
   });
 });
 
 describe("an import from the hub", () => {
-  test("0x<hash>/ and <name>@<version>/ are read from BEND_LIB, and named as bend names them", () => {
+  test("0x<hash>/ and <name>@<version>/ are read from BEND_LIB, and named as bend names them", async () => {
     const lib = mkdtempSync(join(tmpdir(), "bend-emit-lib-"));
-    const local = mkdtempSync(join(tmpdir(), "bend-emit-core-"));
     const hash = "0x" + "ab".repeat(16);
     mkdirSync(join(lib, hash), { recursive: true });
     mkdirSync(join(lib, "names"), { recursive: true });
     writeFileSync(join(lib, "names", "pkg@1.0.0.0"), hash + "\n");
     writeFileSync(join(lib, hash, "bytes.bend"), "import Base\nimport ./more.bend as M\n\ntype Bytes is Data:\n  Bytes{n: Nat}\n");
     writeFileSync(join(lib, hash, "more.bend"), "import Base\n");
-    writeFileSync(join(local, "core.bend"), "import Base\n# a comment between imports\nimport pkg@1.0.0.0/bytes.bend as B  # bytes\nimport ./side.bend as S\n\ndef n(b: B.Bytes) -> Nat:\n  0n\n");
-    writeFileSync(join(local, "side.bend"), "import Base\nimport " + hash + "/more.bend as M\n");
+    const core = files({
+      "core.bend": "import Base\n# a comment between imports\nimport pkg@1.0.0.0/bytes.bend as B  # bytes\nimport ./side.bend as S\n\ndef n(b: B.Bytes) -> Nat:\n  0n\n",
+      "side.bend": "import Base\nimport " + hash + "/more.bend as M\n",
+    });
     const was = process.env.BEND_LIB;
     process.env.BEND_LIB = lib;
     try {
-      const core = join(local, "core.bend");
-      expect(importsOf(core).map((i) => [i.alias, i.path])).toEqual([
-        ["B", realpathSync(join(lib, hash, "bytes.bend"))],
-        ["S", realpathSync(join(local, "side.bend"))],
-      ]);
-      expect([...importPrefixes(core)].sort()).toEqual([hash + "/bytes:", hash + "/more:", "side:"]);
-      const mods = modules(core);
-      expect(mods[0].scope.get("B.Bytes")).toBe("B_Bytes");
-      const { defs } = readDecls(readFileSync(core, "utf8"));
-      expect(declarations(mods, defs)).toContain("export declare function n(b: B_Bytes): number;");
+      expect(Object.fromEntries(prefixes(core))).toEqual({ "": [""], [hash + "/bytes:"]: ["B_"], "side:": ["S_"], [hash + "/more:"]: ["B_M_", "S_M_"] });
     } finally {
       if (was === undefined) delete process.env.BEND_LIB; else process.env.BEND_LIB = was;
     }
+    // bend reads BEND_LIB once, when it loads: the build runs in a process of its own.
+    const out = join(dirname(core), "out");
+    const run = Bun.spawnSync(["bun", fileURLToPath(new URL("../src/emit.ts", import.meta.url)), core, out], { env: { ...process.env, BEND_LIB: lib } });
+    expect(run.stderr.toString()).toBe("");
+    const dts = readFileSync(join(out, "core.d.mts"), "utf8");
+    expect(dts).toContain('export type B_Bytes = { $: "Bytes"; "n": number };');
+    expect(dts).toContain("export declare function n(b: B_Bytes): number;");
+  });
+});
+
+describe("what the runtime holds, not only what the type says", () => {
+  const built = async (src: string) => {
+    const core = files({ "core.bend": "import Base\n\n" + src });
+    const r = await build(core, join(dirname(core), "out"));
+    return { dts: readFileSync(r.dts, "utf8"), mod: await import(r.js) };
+  };
+
+  test("an erased field is not declared: the runtime's object has none", async () => {
+    const { dts, mod } = await built("type T is Data:\n  C{-ghost: Nat, x: Nat}\n\ndef make(n: Nat) -> T:\n  C{0n, n}\n");
+    expect(dts).toContain('export type T = { $: "C"; "x": number };');
+    expect(mod.make(4)).toEqual({ $: "C", x: 4 });
+  });
+
+  test("a returned function the module finishes is declared, and runs both ways", async () => {
+    const { dts, mod } = await built("def add(a: Nat) -> Nat -> Nat:\n  b => (a + b : Nat)\n");
+    expect(dts).toContain("export declare function add(a: number): ((x: number) => number);");
+    expect(mod.add(2)(3)).toBe(5);
+  });
+
+  test("a returned function the module returns unfinished is refused", async () => {
+    const src = "def Fn() -> Type:\n  String -> String\n\ndef id(s: String) -> String:\n  s\n\ndef f(n: Nat) -> Fn:\n  id\n";
+    expect(built(src)).rejects.toThrow("def f: it returns a function bend's module returns unfinished (it takes 1 of 2 arguments)");
+  });
+
+  test("a type named like a TypeScript keyword is refused; such a type parameter is renamed", async () => {
+    expect(built("type class is Data:\n  C{}\n")).rejects.toThrow("cannot name a TypeScript type");
+    const { dts } = await built("type T<class: Data> is Data:\n  C{value: class}\n");
+    expect(dts).toContain('export type T<be$class> = { $: "C"; "value": be$class };');
+  });
+
+  test("an alias with many underscores does not stop the import walk", async () => {
+    const a = "A" + "_".repeat(62);
+    const core = files({
+      "core.bend": `import Base\nimport ./a.bend as ${a}\n`,
+      "a.bend": "import Base\nimport ./b.bend as B\n",
+      "b.bend": "import Base\n\ntype T is Data:\n  C{}\n",
+    });
+    expect(await dtsOf(core)).toContain(`export type ${a}_B_T = { $: "C" };`);
   });
 });
 

@@ -97,7 +97,7 @@ export function declared(src: string): string[] {
 
 describe("names bend-emit's own text declares", () => {
   for (const f of ["loops", "classes", "strpeel", "select", "emit"]) {
-    test(`src/${f}.ts declares only be$ names`, () => {
+    test(`src/${f}.ts declares only be$ names`, async () => {
       expect(declared(readFileSync(fileURLToPath(new URL(`../src/${f}.ts`, import.meta.url)), "utf8"))).toEqual([]);
     });
   }
@@ -108,8 +108,8 @@ describe("names bend-emit's own text declares", () => {
 
 describe("names in the generated .mjs", () => {
   for (const f of FIXTURES) {
-    test(`${f}: bend never writes be$, and bend-emit adds only be$ names`, () => {
-      const raw = idents(bundle(`test/${f}.bend`));
+    test(`${f}: bend never writes be$, and bend-emit adds only be$ names`, async () => {
+      const raw = idents(await bundle(`test/${f}.bend`));
       expect([...raw].filter((n) => n.startsWith("be$"))).toEqual([]);
       const text = readFileSync(new URL(`./dist/${f}.mjs`, import.meta.url), "utf8");
       // `export { be$0 as name }`: the exported names are the user's own (D3)

@@ -94,8 +94,8 @@ const defOf = (js: string, name: string) => {
   return m[0];
 };
 
-test("the native String.order.go returns what bend's own returns", () => {
-  const js = bundle(new URL("./strings.bend", import.meta.url).pathname);
+test("the native String.order.go returns what bend's own returns", async () => {
+  const js = await bundle(new URL("./strings.bend", import.meta.url).pathname);
   const runtime = ["char_new", "char_len", "char_code", "cmp_new"].map((n) => defOf(js, n)).join("\n");
   const r = intrinsics(js);
   expect(r.native.map((n) => n.name)).toEqual(["$String_order_go"]);
@@ -122,8 +122,8 @@ test("a String.order.go other than bend's own text is left alone and reported", 
   expect(r.skipped.map((s) => s.name)).toEqual(["$String_order_go"]);
 });
 
-test("bend's own String.order.go without the runtime helpers it would call is left alone", () => {
-  const own = defOf(bundle(new URL("./strings.bend", import.meta.url).pathname), "$String_order_go");
+test("bend's own String.order.go without the runtime helpers it would call is left alone", async () => {
+  const own = defOf(await bundle(new URL("./strings.bend", import.meta.url).pathname), "$String_order_go");
   const r = intrinsics(own);
   expect(r.js).toBe(own);
   expect(r.skipped.map((s) => s.reason)).toEqual(["the runtime's char_len(s, at) and char_code(s) are not in the module"]);

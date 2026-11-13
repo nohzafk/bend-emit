@@ -9,9 +9,10 @@ optimizations to Bend's JavaScript output.
 
 ## Quick Start
 
-Install **Bend 2.0.40** and **Bun**, with both `bend` and `bun` on PATH.
-The commands below also require Node.js and npm for `npx`.
-Installing this npm package does not install Bend or Bun.
+Install **Bun**, with `bun` on PATH. bend-emit carries the source of
+**Bend 2.0.40** and runs it in-process, so `bend` itself need not be
+installed. The commands below also require Node.js and npm for `npx`.
+Installing this npm package does not install Bun.
 
 Save this as `core.bend`:
 
@@ -76,7 +77,7 @@ other pure logic with precise requirements.
 
 bend-emit uses Bend's JavaScript backend rather than a second implementation
 of your core. Your TypeScript application calls the generated functions,
-with declarations derived from the Bend source.
+with declarations derived from the checked Bend core.
 
 **The generated JavaScript is not independently proved.** Its behavior also
 depends on Bend's backend and bend-emit's transformations. Tests compare
@@ -89,15 +90,22 @@ JavaScript interface to a schema checker written in Bend.
 
 ## How It Works
 
-bend-emit runs `bend <core.bend> -o <out>.mjs`, then processes the emitted
-module and reads the source's data declarations and definition headers.
-A header or a constructor may span several lines. The data types of every
-imported file are read too: a relative import, and a hub package imported as
-`0x<hash>/...` or `<name>@<version>/...`, which is read from `BEND_LIB`
-(default `~/.bend/lib`) where bend fetched it.
+bend-emit loads and checks the core with Bend's own source, as
+`bend <core.bend> -o <out>.mjs` does, and takes the JavaScript from Bend's
+own compiler in the same process: the text that command writes. No Bend
+source is parsed by bend-emit.
+
+The declarations come from the checked core: each definition's type and each
+data type's constructors, as Bend's checker holds them. Imports are Bend's to
+resolve: a relative import, and a hub package imported as `0x<hash>/...` or
+`<name>@<version>/...`, fetched into `BEND_LIB` (default `~/.bend/lib`).
+A type alias such as `def Var() -> Data` is resolved to the type it names.
+An imported type is named by its import alias, `G_Err` for `Err` in
+`import ./g.bend as G`; a file reached through two imports is declared once,
+and its other names are aliases of the first.
 
 Bend exports a default object. bend-emit adds named exports for its definitions
-while retaining the default export's interface. It checks that the source
+while retaining the default export's interface. It checks that the declared
 names and compiled export names agree before writing the output.
 
 Supported types follow Bend's runtime representation:
@@ -111,7 +119,7 @@ Supported types follow Bend's runtime representation:
 | `String` | `string` |
 | `Char` | `string` containing one code point |
 | `Map<A>` | `BendMap<A>`: a tagged tree with `MTip`, `MLeaf`, and `MNode` |
-| `A & B` | `BendPair<A, B>`: `{ $: "Tuple", fst, snd }` |
+| `A & B`, `Sigma<A, _ => B>` | `BendPair<A, B>`: `{ $: "Tuple", fst, snd }` |
 | `Cmp` | `BendCmp`: `LT`, `EQ` or `GT` |
 
 The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, `BendEither`, `BendPair`, and `BendCmp` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
@@ -210,12 +218,13 @@ Template definitions are not exported by Bend's ES-module target.
 
 ## Toolchain Requirements
 
-The build tool requires Bun and **exactly Bend 2.0.40**, the version recorded
-in `BEND_VERSION`. Another Bend version is rejected before compilation.
+The build tool requires Bun. It runs **exactly Bend 2.0.40**, the version
+recorded in `BEND_VERSION`, from the Bend source the package carries in
+`bend2/`. A `bend2/` of another version is rejected before compilation.
 
-The emitter reads and transforms compiler output, so a different compiler
-version could change the shapes it relies on. Pin bend-emit and use the Bend
-version required by that release.
+The emitter transforms compiler output, so a different compiler version could
+change the shapes it relies on. Each bend-emit release carries the Bend it was
+tested with.
 
 ## Development
 
@@ -226,6 +235,12 @@ bun install --frozen-lockfile
 sh test.sh
 ```
 
+The gate first puts Bend's source in `bend2/` (`sh tools/bend-src`, which
+`npm pack` also runs). It takes the source from `$BEND_SRC`, else
+`~/projects/.toolchains/bend-src-<version>`, else a Bend checkout at
+`~/projects/bend` at tag `v<version>`. `bend2/` is not committed. The gate
+also checks its fixture cores with the `bend` command of that version.
+
 The gate builds fixture cores, checks runtime values and declarations,
 compares optimized output with Bend's output, and tests refusal paths.
 It also typechecks valid and invalid TypeScript calls and loads a generated
@@ -234,3 +249,6 @@ module with Node in both CommonJS and ESM packages.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+The npm package also contains Bend's source in `bend2/`, under the Apache
+License 2.0. See `bend2/LICENSE`.

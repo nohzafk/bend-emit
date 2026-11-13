@@ -24,6 +24,9 @@ fi
 BEND_NO_TELEMETRY=1
 export BEND_NO_TELEMETRY
 
+# bend's own source, at that version, which the tool loads (tools/bend-src).
+sh tools/bend-src > /dev/null
+
 echo "== 1. the modules =="
 # Each test file imports the module built from its fixture, so build them
 # beside the tests first -- gitignored: nothing here is published. dist/ is
@@ -95,12 +98,12 @@ LOADER
 done
 
 echo "== 5. another bend is refused =="
-# A fake bend first on PATH that answers another version: the tool must stop
-# before it compiles anything, naming both versions.
+# A copy of the tool whose bend2/ says another version: it must stop before it
+# compiles anything, naming both versions.
 FAKE=$(mktemp -d)
-printf '#!/bin/sh\necho "bend 2.0.0"\n' > "$FAKE/bend"
-chmod +x "$FAKE/bend"
-if PATH="$FAKE:$PATH" bun src/emit.ts test/generics.bend "$FAKE/out" > "$FAKE/log" 2>&1; then
+cp -R src BEND_VERSION package.json bend2 "$FAKE/"
+echo "2.0.0" > "$FAKE/bend2/VERSION"
+if bun "$FAKE/src/emit.ts" test/generics.bend "$FAKE/out" > "$FAKE/log" 2>&1; then
   echo "FAIL: the tool built a module with bend 2.0.0"
   exit 1
 fi

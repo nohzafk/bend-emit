@@ -1,0 +1,85 @@
+#!/bin/sh
+# Put bend's own source, at the version BEND_VERSION names, in bend2/ beside
+# this package's src/: bend-emit loads and checks a core with it, and gets the
+# JavaScript from it, in-process. bend2/ is gitignored; the npm package carries
+# it (prepack runs this with --tag).
+#
+# The source is taken from the first of:
+#   $BEND_SRC                                   a bend checkout, or a source tree
+#   ~/projects/bend ($BEND_REPO)                a bend checkout with tag v<v>
+#   ~/projects/.toolchains/bend-src-<v>         a checkout, or a source tree
+#
+# From a checkout (a worktree too), the files are those of tag v<v>, read
+# from git: uncommitted edits and another checked-out commit do not reach
+# bend2/. A source tree that is not a checkout has no tag to check, so its
+# version is taken from where it was found, and the script says so; --tag
+# refuses one.
+#
+# Usage: sh tools/bend-src [--tag]
+
+set -e
+cd "$(dirname "$0")/.."
+V=$(tr -d ' \t\n\r' < BEND_VERSION)
+TAG_ONLY=
+[ "$1" = "--tag" ] && TAG_ONLY=1
+REPO="${BEND_REPO:-$HOME/projects/bend}"
+TREE="$HOME/projects/.toolchains/bend-src-$V"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+die() {
+  echo "bend-src: $*" >&2
+  exit 1
+}
+
+checkout() {
+  git -C "$1" rev-parse --is-inside-work-tree > /dev/null 2>&1
+}
+
+tagged() {
+  checkout "$1" && git -C "$1" rev-parse -q --verify "refs/tags/v$V" > /dev/null
+}
+
+from_git() {
+  top=$(git -C "$1" rev-parse --show-toplevel)
+  tagged "$top" || die "$top has no tag v$V"
+  git -C "$top" archive -o "$tmp/src.tar" "v$V" bend2 LICENSE || die "could not read tag v$V of $top"
+  tar -xf "$tmp/src.tar" -C "$tmp"
+  echo "bend2 $V from tag v$V of $top"
+}
+
+from_tree() {
+  [ -f "$1/bend2/bend.ts" ] || die "no bend source in $1"
+  [ -z "$TAG_ONLY" ] || die "$1 is not a checkout, so its version cannot be checked (--tag)"
+  cp -R "$1/bend2" "$1/LICENSE" "$tmp/"
+  echo "bend2 $V from $1 (unchecked: its version is taken from where it was found)"
+}
+
+from() {
+  if checkout "$1"; then from_git "$1"; else from_tree "$1"; fi
+}
+
+if [ -n "$BEND_SRC" ]; then
+  from "$BEND_SRC"
+elif tagged "$REPO"; then
+  from_git "$REPO"
+elif [ -d "$TREE" ]; then
+  from "$TREE"
+else
+  die "no bend $V source: set BEND_SRC, tag v$V in $REPO, or unpack it to $TREE"
+fi
+
+# What a build reaches: the checker and the compiler, Base, and the effects'
+# JavaScript (comp reads effs/<name>.js for a core's IO defs).
+rm -rf bend2
+mkdir -p bend2/effs
+cp "$tmp/bend2/base.bend" bend2/
+# bend's TypeScript is checked by bend's own build, under its own settings;
+# this package's tsc reads its types and does not check its bodies.
+for f in bend.ts comp.ts; do
+  { echo "// @ts-nocheck"; cat "$tmp/bend2/$f"; } > "bend2/$f"
+done
+cp "$tmp"/bend2/effs/*.js bend2/effs/
+cp "$tmp/LICENSE" bend2/LICENSE
+printf '%s\n' "$V" > bend2/VERSION
