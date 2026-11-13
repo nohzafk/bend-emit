@@ -121,8 +121,26 @@ Supported types follow Bend's runtime representation:
 | `Map<A>` | `BendMap<A>`: a tagged tree with `MTip`, `MLeaf`, and `MNode` |
 | `A & B`, `Sigma<A, _ => B>` | `BendPair<A, B>`: `{ $: "Tuple", fst, snd }` |
 | `Cmp` | `BendCmp`: `LT`, `EQ` or `GT` |
+| `Array<A>` | `BendArray<A>`: a JavaScript array `A[]` |
+| `Word(n)` | `BendWord`: `n` cells `{ $: "WCon", head: boolean, tail }`, low bit first, ending in `{ $: "WNil" }` |
+| a type a law declares and nothing defines (`Chan(A)`, `File`, `Socket`, ...) | `BendHandle<"Chan", [A]>`, `BendHandle<"File">`: a branded value the host can only pass back |
+| a proof, `{a == b : T}` | `null` |
+| `@-R: Type -> ...`, a function with an erased type argument | a generic function, `<R>(x: ...) => ...` |
 
-The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, `BendEither`, `BendPair`, and `BendCmp` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
+The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, `BendEither`, `BendPair`, `BendCmp`, `BendArray`, `BendWord` and `BendHandle` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
+
+The types say less than Bend does, and a host must keep the rest:
+
+- An `Array`'s length is a power of two (`Array.new`'s depth `d` makes `2^d`
+  cells). A def an array is passed to owns it, and may change it in place:
+  `Array.set` returns the array it was given. Pass a copy to keep the original.
+- `Word(n)` is one TypeScript type for every `n`; the def expects exactly `n`
+  cells.
+- A type parameter that is a value, an index (`Vec<-n: Nat>`), is not in the
+  runtime's value, and the TypeScript type drops it: `Vec<3n>` is `Vec`.
+- A proof the host passes as `null` asserts its equation; nothing checks it.
+- Any other erased argument of a function (`@-n: Nat -> ...`) is not passed,
+  and is left out of its TypeScript type.
 
 ### Runtime Transformations
 

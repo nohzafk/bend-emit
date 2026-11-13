@@ -120,6 +120,7 @@ const GENERICS: Record<string, { params: number; ts: string }> = {
   Maybe: { params: 1, ts: "BendMaybe" },
   Result: { params: 2, ts: "BendResult" },
   Either: { params: 2, ts: "BendEither" },
+  Array: { params: 1, ts: "BendArray" },
 };
 
 // Base's types as the runtime encodes them: a constructor's name, and its
@@ -133,10 +134,21 @@ const PREAMBLE = [
   "export type BendUnit = { $: \"Unit\" };",
   "export type BendPair<A, B> = { $: \"Tuple\"; fst: A; snd: B };",
   "export type BendCmp = { $: \"LT\" } | { $: \"EQ\" } | { $: \"GT\" };",
+  // An Array is a JS array of its elements, of a power-of-two length (2^d for
+  // Array.new's depth d). The runtime changes it in place: a def it is passed
+  // to owns it.
+  "export type BendArray<T> = T[];",
+  // A Word(n) is n bits, low first, each a WCon cell; n is not in the type.
+  "export type BendWord = { $: \"WNil\" } | { $: \"WCon\"; head: boolean; tail: BendWord };",
+  // A type Bend declares and never defines (Base's File, Socket, Chan, ...;
+  // `law Chan:`): a runtime value the host can only pass back. Its name and
+  // type arguments brand it.
+  "declare const be$handle: unique symbol;",
+  "export type BendHandle<K extends string, A extends unknown[] = []> = { readonly [be$handle]: [K, ...A] };",
 ];
 // The names the preamble declares. They are public (a host imports them), so a
 // data type of the same name is refused rather than renamed.
-const PREAMBLE_TYPES = new Set(PREAMBLE.map((l) => l.match(/^export type (\w+)/)![1]));
+const PREAMBLE_TYPES = new Set(PREAMBLE.flatMap((l) => l.match(/^export type (\w+)/)?.[1] ?? []));
 
 // A type with no TypeScript encoding. `dependent` marks one that depends on a
 // value (a parameter, or a type a def computes): a def so typed is left out
@@ -159,16 +171,37 @@ interface Ctx {
   B: BendMod;
   book: Book;
   names: Map<string, string>; // a data type's key in the Book -> its TypeScript name
+  generics: number; // type parameters of polymorphic functions written so far
 }
 
-// The kinds of a type's parameters: a quantity (dropped from TypeScript), a
-// type (a TypeScript type parameter), or another (no encoding).
-function paramKinds(c: Ctx, k: string): ("quant" | "type" | string)[] {
-  const tld = c.book.tlds[k] as BendT.ADT;
-  return c.B.tele_unbind(c.book, tld.T).doms.slice(0, tld.n).map(([, , A]) => {
+// The kinds of a type's parameters: an index, a value (a quantity, a Nat, any
+// data), which the runtime's values do not carry and TypeScript drops; a type
+// (a TypeScript type parameter); or another, such as Type -> Type (no
+// encoding).
+type Kind = "index" | "type" | string;
+function kindsOf(c: Ctx, T: HTerm, n: number): Kind[] {
+  return c.B.tele_unbind(c.book, T).doms.slice(0, n).map(([, , A]) => {
     const w = c.B.term_wnf(c.book, A);
-    return w.$ === "Qnt" ? "quant" : w.$ === "Typ" ? "type" : show(c, w);
+    return w.$ === "Qnt" || w.$ === "ADT" ? "index" : w.$ === "Typ" ? "type" : show(c, w);
   });
+}
+function paramKinds(c: Ctx, k: string): Kind[] {
+  const tld = c.book.tlds[k] as BendT.ADT;
+  return kindsOf(c, tld.T, tld.n);
+}
+
+// A type a law declares and nothing defines (`law Chan:` / `for -A: Type` /
+// `Data`): its key and its type arguments, or null.
+function handleOf(c: Ctx, w: HTerm): { k: string; args: HTerm[] } | null {
+  const [h, xs] = c.B.term_unapply(w);
+  if (h.$ !== "Ref") return null;
+  const tld = c.book.tlds[h.k];
+  if (tld?.$ !== "Def" || tld.v !== null) return null;
+  const { doms, ret } = c.B.tele_unbind(c.book, tld.T);
+  if (doms.length !== xs.length || c.B.term_wnf(c.book, ret).$ !== "Typ") return null;
+  const kinds = kindsOf(c, tld.T, doms.length);
+  if (kinds.some((x) => x !== "index" && x !== "type")) return null;
+  return { k: h.k, args: xs.filter((_, i) => kinds[i] === "type") };
 }
 
 function show(c: Ctx, t: HTerm): string {
@@ -195,14 +228,49 @@ function tsType(c: Ctx, t: HTerm, vars: Map<number, string>, where: string): str
     case "All": {
       // A function, A -> B. The runtime passes a closure as a plain JS
       // function of one argument.
-      if (w.q.$ === "None") throw new NoEncoding(`${where}: a function with an erased argument (${show(c, w)})`, true);
+      const x = probe(c.B, w.k);
+      if (w.q.$ === "None") {
+        // An erased argument is not passed. One that is a type (@-R: Type ->)
+        // makes the function generic in it; any other is dropped, and the
+        // rest may not depend on it.
+        if (c.B.term_wnf(c.book, w.A).$ !== "Typ") return tsType(c, w.B(x), vars, where);
+        // Its name is new in the declaration and in every enclosing scope (a
+        // data type's parameter may be written be$<name> too), so it shadows
+        // nothing the body refers to.
+        const inScope = new Set(vars.values());
+        let r: string;
+        do r = `be$${w.k.replace(/\W/g, "_")}${c.generics++}`; while (inScope.has(r));
+        const f = tsType(c, w.B(x), new Map(vars).set(x.i, r), where);
+        // A type argument the rest never names leaves nothing generic: the
+        // value is the rest's (@-R: Type -> U32 is a number at run time).
+        if (!new RegExp(`(?<![\\w$])${r.replace(/\$/g, "\\$")}(?![\\w$])`).test(f)) return f;
+        // ((x: A) => B) becomes (<R>(x: A) => B); (<S>...) becomes (<R, S>...).
+        if (f.startsWith("(<")) return `(<${r}, ${f.slice(2)}`;
+        if (f.startsWith("((")) return `(<${r}>${f.slice(1)}`;
+        throw new NoEncoding(`${where}: a value of every type (${show(c, w)})`, false);
+      }
       const a = tsType(c, w.A, vars, where);
-      return `((x: ${a}) => ${tsType(c, w.B(probe(c.B, w.k)), vars, where)})`;
+      return `((x: ${a}) => ${tsType(c, w.B(x), vars, where)})`;
     }
     case "ADT":
       return adtType(c, w, vars, where);
+    case "Eql":
+      // A proof, {a == b : T}: the runtime holds no evidence, only null. A
+      // host that passes one asserts the equation; nothing checks it.
+      return "null";
     case "Ref":
-    case "App":
+    case "App": {
+      // Base's Word(n), whatever n is: the runtime's value is n WCon cells,
+      // the type it computes for a known n (Word.Con<p>) is BendWord too.
+      const [f] = c.B.term_unapply(w);
+      if (f.$ === "Ref" && f.k === "Word" && (c.book.tlds.Word as BendT.Def | undefined)?.b) return "BendWord";
+      const h = handleOf(c, w);
+      if (h) {
+        const as = h.args.map((a) => tsType(c, a, vars, where));
+        return `BendHandle<${JSON.stringify(h.k)}${as.length ? `, [${as.join(", ")}]` : ""}>`;
+      }
+    }
+    // falls through
     case "Typ":
       // A type a def computes (Pick(b)), or a type as a value.
       throw new NoEncoding(`${where}: a type computed from a value (${show(c, w)})`, true);
@@ -215,7 +283,7 @@ function adtType(c: Ctx, w: Of<"ADT">, vars: Map<number, string>, where: string)
   if (w.r.length) throw new NoEncoding(`${where}: no TypeScript encoding for a type with constructors removed (${show(c, w)})`, false);
   const tld = c.book.tlds[w.k] as BendT.ADT;
   const kinds = paramKinds(c, w.k);
-  const args = w.x.filter((_, i) => kinds[i] !== "quant");
+  const args = w.x.filter((_, i) => kinds[i] !== "index");
   if (tld.b) {
     switch (w.k) {
       // An F32 is the runtime's JS number, rounded to single precision.
@@ -226,6 +294,7 @@ function adtType(c: Ctx, w: Of<"ADT">, vars: Map<number, string>, where: string)
       case "String": case "Char": return "string";
       case "Unit": return "BendUnit";
       case "Cmp": return "BendCmp";
+      case "Word.Nil": case "Word.Con": return "BendWord";
       case "Sigma": {
         // A pair, A & B: the runtime's {$: "Tuple", fst, snd}, when the type
         // of snd does not depend on fst.
@@ -355,7 +424,7 @@ export function declarations(l: Loaded, core: string, defs: string[], arity: Map
     if (!p) fail(`type ${local(k)} of ${nsOf(k).slice(0, -1)} is reached through no import this tool can read`);
     names.set(k, p[0] + tsName(local(k)));
   }
-  const c: Ctx = { B, book, names };
+  const c: Ctx = { B, book, names, generics: 0 };
   // Every TypeScript type name the declaration writes, aliases included.
   const taken = new Set<string>([...PREAMBLE_TYPES, ...names.values()]);
   for (const k of adts) for (const p of pre.get(nsOf(k))!) taken.add(p + tsName(local(k)));
@@ -376,8 +445,8 @@ export function declarations(l: Loaded, core: string, defs: string[], arity: Map
     claim(name, source(ps[0]));
     const tld = book.tlds[k] as BendT.ADT;
     const kinds = paramKinds(c, k);
-    const bad = kinds.find((x) => x !== "quant" && x !== "type");
-    if (bad) fail(`type ${name}: a type parameter of kind ${bad} (only Data and Type are supported)`);
+    const bad = kinds.find((x) => x !== "index" && x !== "type");
+    if (bad) fail(`type ${name}: a type parameter of kind ${bad} (only a type, or a value the type is indexed by)`);
     if (tld.c.length === 0) fail(`type ${name}: no constructors, so no value can cross`);
     // Each constructor's type opens on the data type's parameters, then its
     // fields; the parameters are named as the data type names them.
@@ -471,7 +540,8 @@ function signature(c: Ctx, k: string, arity: Map<string, number>, undeclared?: s
   const where = `def ${k}`;
   const takes = arity.get(k) ?? fail(`${where}: bend's module has no entry for it`);
   let all = 0;
-  for (let t = B.tele_open(book, T); t !== null; t = B.tele_open(book, t.B(probe(B, t.k)))) all++;
+  // An erased argument is not one the entry takes.
+  for (let t = B.tele_open(book, T); t !== null; t = B.tele_open(book, t.B(probe(B, t.k)))) if (t.q.$ !== "None") all++;
   try {
     if (takes < doms.length + all) {
       throw new NoEncoding(`${where}: it returns a function bend's module returns unfinished (it takes ${takes} of ${doms.length + all} arguments)`, false);

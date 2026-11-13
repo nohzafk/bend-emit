@@ -66,7 +66,44 @@ describe("the .d.mts", () => {
   });
 
   test("a Base type the tool has no encoding for is refused, by name", async () => {
-    expect(sig("def f(a: Array<Nat>) -> Nat:")).rejects.toThrow("def f: no TypeScript encoding for the Bend type Array");
+    expect(sig("def f(a: Image) -> Nat:")).rejects.toThrow("def f: no TypeScript encoding for the Bend type Image");
+  });
+
+  test("Array and Word are Base's encodings; Word(n) is one type whatever n is", async () => {
+    expect(await sig("def f(a: Array<U32>) -> Array<Bool>:")).toBe("export declare function f(a: BendArray<number>): BendArray<boolean>;");
+    expect(await sig("def f(w: Word(8n)) -> Word(0n):")).toBe("export declare function f(w: BendWord): BendWord;");
+    const w = await dtsOf(files({ "core.bend": "import Base\n\ntype W<-n: Nat> is Data:\n  W{w: Word(n)}\n" }));
+    expect(w).toContain('export type W = { $: "W"; "w": BendWord };');
+  });
+
+  test("a type Base declares and never defines is a branded handle", async () => {
+    const h = await dtsOf(files({ "core.bend": "import Base\n\ntype H is Type:\n  H{c: Chan(Nat), f: File}\n" }));
+    expect(h).toContain('export type H = { $: "H"; "c": BendHandle<"Chan", [number]>; "f": BendHandle<"File"> };');
+  });
+
+  test("a proof field is null", async () => {
+    const p = await dtsOf(files({ "core.bend": "import Base\n\ntype P<-k: U32> is Data:\n  P{v: U32, ok: {v == k : U32}}\n" }));
+    expect(p).toContain('export type P = { $: "P"; "v": number; "ok": null };');
+  });
+
+  test("a function with an erased type argument is generic in it; another erased argument is dropped", async () => {
+    expect(await sig("def f(g: @-R: Type -> @k: (U32 -> R) -> R) -> Nat:")).toBe(
+      "export declare function f(g: (<be$R0>(x: ((x: number) => be$R0)) => be$R0)): number;",
+    );
+    expect(await sig("def f(g: @-R: Type -> @-S: Type -> R -> S -> R) -> Nat:")).toBe(
+      "export declare function f(g: (<be$R0, be$S1>(x: be$R0) => ((x: be$S1) => be$R0))): number;",
+    );
+    expect(await sig("def f(g: @-n: Nat -> U32 -> U32) -> Nat:")).toBe("export declare function f(g: ((x: number) => number)): number;");
+ 
+  });
+
+  test("a function's generic shadows no enclosing type parameter, even one written be$<name>", async () => {
+    const dts = await dtsOf(files({ "core.bend": "import Base\n\ntype R0 is Data:\n  MkR0{}\n\ntype Box<-R0: Type> is Type:\n  Box{run: @-R: Type -> @k: (R0 -> R) -> R}\n" }));
+    expect(dts).toContain('export type Box<be$R0> = { $: "Box"; "run": (<be$R1>(x: ((x: be$R0) => be$R1)) => be$R1) };');
+  });
+
+  test("an erased type argument the rest never names leaves the rest's type", async () => {
+    expect(await sig("def f(g: @-R: Type -> U32) -> Nat:")).toBe("export declare function f(g: number): number;");
   });
 
   test("a function parameter, of one or of two arguments", async () => {
@@ -82,7 +119,7 @@ describe("what the tool writes", () => {
   // resolving a .mjs tries core.mts then core.d.mts and stops (measured with
   // --traceResolution). A .d.ts beside a .mjs would be a file nothing reads, so
   // the tool writes exactly these two per core and nothing else.
-  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "select", "closure_last", "peel"];
+  const stems = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "select", "closure_last", "peel", "natives"];
 
   test("each fixture is a .mjs module and a .d.mts declaration, and nothing else", () => {
     const files = readdirSync(new URL("./dist/", import.meta.url)).sort();
@@ -211,11 +248,14 @@ describe("generic data, and types that depend on a value", () => {
     expect(dts).toContain("export declare function one(): number;");
   });
 
-  test("a type parameter of kind Type is declared; one of kind Nat is refused, by name", async () => {
+  test("a type parameter of kind Type is declared; an index is dropped; a higher kind is refused, by name", async () => {
     const box = await dtsOf(files({ "core.bend": "import Base\n\ntype Box<T: Type> is Type:\n  Box{x: T}\n" }));
     expect(box).toContain('export type Box<T> = { $: "Box"; "x": T };');
-    const vec = files({ "core.bend": "import Base\n\ntype Vec<-n: Nat> is Data:\n  Vec{x: Nat}\n" });
-    expect(dtsOf(vec)).rejects.toThrow("type Vec: a type parameter of kind Nat");
+    const vec = await dtsOf(files({ "core.bend": "import Base\n\ntype Vec<-n: Nat, -T: Type> is Type:\n  Vec{x: T}\n\ndef f(v: Vec<3n, Bool>) -> Nat:\n  ?TODO\n" }));
+    expect(vec).toContain('export type Vec<T> = { $: "Vec"; "x": T };');
+    expect(vec).toContain("export declare function f(v: Vec<boolean>): number;");
+    const hk = files({ "core.bend": "import Base\n\ntype F<-K: Type -> Type> is Type:\n  F{x: K(Nat)}\n" });
+    expect(dtsOf(hk)).rejects.toThrow("type F: a type parameter of kind");
   });
 });
 
@@ -426,5 +466,50 @@ describe("a def that returns IO", () => {
     expect(dts).toContain("export declare function add(a: number, b: number): number;");
     expect(dts).not.toContain("hello");
     expect(Object.keys((await import(r.js)).default).sort()).toEqual(["add", "hello"]);
+  });
+});
+
+describe("Base's Array and Word, indexed types, proofs and polymorphic fields at run time", () => {
+  test("an Array is a JS array; a def it is passed to may change it in place", async () => {
+    const { filled, first, put } = await import("./dist/natives.mjs");
+    expect(filled(5)).toEqual([5, 5, 5, 5]);
+    expect(first([7, 8, 9, 10])).toBe(7);
+    const a = [1, 2, 3, 4];
+    expect(put(a)).toEqual([1, 99, 3, 4]);
+    expect(a).toEqual([1, 99, 3, 4]);
+  });
+
+  test("a Word is its WCon cells, low bit first", async () => {
+    const { bits, low } = await import("./dist/natives.mjs");
+    const w = bits(true);
+    expect(w).toEqual({ $: "WCon", head: true, tail: { $: "WCon", head: false, tail: { $: "WCon", head: true, tail: { $: "WNil" } } } });
+    expect(low(w)).toBe(true);
+  });
+
+  test("an index is not in the value; a proof is null", async () => {
+    const { pair, fits } = await import("./dist/natives.mjs");
+    expect(pair(3)).toEqual({ $: "Vec", xs: { $: "Con", head: 3, tail: { $: "Con", head: 3, tail: { $: "Nil" } } } });
+    expect(fits(5)).toEqual({ $: "Fits", v: 5, ok: null });
+  });
+
+  test("a polymorphic field is a function of its runtime arguments only, both ways", async () => {
+    const { boxed, unbox } = await import("./dist/natives.mjs");
+    expect(boxed(4).run((y: number) => [y])).toEqual([4]);
+    expect(unbox({ $: "Box", run: (k) => k(1) })).toBe(11);
+  });
+
+  test("an unused erased type argument is not a function at run time", async () => {
+    const { konst } = await import("./dist/natives.mjs");
+    expect(konst(5)).toEqual({ $: "Konst", run: 5 });
+  });
+
+  test("the declaration says so", () => {
+    const dts = readFileSync(new URL("./dist/natives.d.mts", import.meta.url), "utf8");
+    expect(dts).toContain("export declare function put(a: BendArray<number>): BendArray<number>;");
+    expect(dts).toContain("export declare function bits(b: boolean): BendWord;");
+    expect(dts).toContain("export declare function pair(x: number): Vec;");
+    expect(dts).toContain("export declare function fits(x: number): Fits;");
+    expect(dts).toContain('export type Box = { $: "Box"; "run": (<be$R0>(x: ((x: number) => be$R0)) => be$R0) };');
+    expect(dts).toContain('export type Konst = { $: "Konst"; "run": number };');
   });
 });
