@@ -6,7 +6,8 @@
 //
 //   skipped: every `law`; every def whose header holds `==` (a lemma); a def
 //            named like a law (its proof); every def or type that names a
-//            skipped one, directly or through an import alias (`KF.lemma`)
+//            skipped one, directly or through an import alias (`KF.lemma`),
+//            or names anything through a dropped import's alias (`MN.x`)
 //   dropped: every `import bend-mathlib...` line
 //
 // Skipping is silent. A file with nothing to skip comes back as it is, so an
@@ -25,6 +26,8 @@ const mentions = (code: string, n: string) => new RegExp(`(?<![\\w.'])${esc(n)}(
 // `foreign` holds the skipped names of its imports, as this file writes them.
 function strip(text: string, foreign: Set<string>): { text: string; skipped: Set<string> } {
   const blocks = text.split(/^(?=law |def |type |import )/m).filter((b) => !/^import bend-mathlib/.test(b));
+  const dropped = [...text.matchAll(/^import bend-mathlib\S* as ([A-Za-z_]\w*)/gm)].map((m) => m[1]);
+  const viaDropped = (code: string) => dropped.some((a) => new RegExp(`(?<![\\w.'])${esc(a)}\\.\\w`).test(code));
   const laws = new Set(blocks.filter((b) => b.startsWith("law ")).map((b) => nameOf(b)!));
   const gone = new Set<string>([...laws]);
   const live = blocks.filter((b) => !b.startsWith("law "));
@@ -39,7 +42,7 @@ function strip(text: string, foreign: Set<string>): { text: string; skipped: Set
       const n = nameOf(b);
       if (!n || gone.has(n) || !/^(def|type) /.test(b)) continue;
       const code = b.replace(/#.*$/gm, "");
-      if ([...gone, ...foreign].some((g) => mentions(code, g))) { gone.add(n); more = true; }
+      if (viaDropped(code) || [...gone, ...foreign].some((g) => mentions(code, g))) { gone.add(n); more = true; }
     }
   }
   const kept = live.filter((b) => !(/^(def|type) /.test(b) && gone.has(nameOf(b) ?? "\0")));

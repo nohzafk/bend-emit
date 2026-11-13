@@ -12,13 +12,13 @@ const dts = readFileSync(r.dts, "utf8");
 const mod = (await import(r.js)).default as Record<string, Function>;
 
 test("plain defs and types are emitted", () => {
-  expect(Object.keys(mod).filter((k) => !k.includes(":")).sort()).toEqual(["spec_cmp", "spec_cmp_zero", "spec_double", "spec_heavier"]);
+  expect(Object.keys(mod).filter((k) => !k.includes(":")).sort()).toEqual(["spec_double", "spec_heavier", "spec_image", "spec_image_zero"]);
   expect(dts).toContain("export type Duo =");
   expect(mod.spec_double(4)).toBe(8);
 });
 
 test("laws, lemmas and defs that need them are skipped, silently", () => {
-  for (const n of ["double_zero", "double_zero_lemma", "uses_lemma", "spec_checked", "twice_zero", "twice_checked"]) {
+  for (const n of ["double_zero", "double_zero_lemma", "uses_lemma", "spec_checked", "twice_zero", "twice_checked", "spec_via_mathlib"]) {
     expect(Object.keys(mod)).not.toContain(n);
     expect(dts).not.toContain(n);
   }
@@ -26,13 +26,13 @@ test("laws, lemmas and defs that need them are skipped, silently", () => {
 });
 
 test("a def with no TypeScript encoding stays in the module, undeclared", () => {
-  expect(r.undeclared).toEqual(["spec_cmp"]);
-  expect(dts).not.toContain("spec_cmp(");
-  expect(dts).toContain("spec_cmp_zero");
+  expect(r.undeclared).toEqual(["spec_image"]);
+  expect(dts).not.toContain("spec_image(");
+  expect(dts).toContain("spec_image_zero");
 });
 
 test("an ordinary file still refuses a def with no TypeScript encoding", async () => {
   const f = join(out, "plain.bend");
-  await Bun.write(f, "import Base\n\ndef c(x: Cmp) -> Nat:\n  0n\n");
+  await Bun.write(f, "import Base\n\ndef c(x: Image) -> Nat:\n  0n\n");
   expect(build(f, join(out, "plain"))).rejects.toThrow("no TypeScript encoding");
 });

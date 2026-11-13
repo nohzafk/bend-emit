@@ -27,8 +27,8 @@
 // again. The def names read from the source must be exactly the names the
 // compiled module exports, or nothing is written.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { entries, type Entry } from "./entries";
 import { loopify, type Stayed } from "./loops";
@@ -53,8 +53,8 @@ function splitTop(s: string): string[] {
   let cur = "";
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === "-" && s[i + 1] === ">") {
-      cur += "->"; // an arrow's > is not a closing bracket
+    if ((ch === "-" || ch === "=") && s[i + 1] === ">") {
+      cur += ch + ">"; // the > of an arrow (->, or a lambda's =>) is not a closing bracket
       i++;
       continue;
     }
@@ -77,19 +77,80 @@ function nameType(s: string): [string, string] {
   return [s.slice(0, i).trim(), s.slice(i + 1).trim()];
 }
 
-export function readDecls(src: string): { datas: Data[]; defs: Def[] } {
+// The bracket depth at the end of s: (, < and { open; their closers close; the
+// > of an arrow (-> or =>) closes nothing.
+function depthOf(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if ((ch === "-" || ch === "=") && s[i + 1] === ">") { i++; continue; }
+    if (ch === "<" || ch === "{" || ch === "(") depth++;
+    if (ch === ">" || ch === "}" || ch === ")") depth--;
+  }
+  return depth;
+}
+
+// The index of the bracket that closes the one opening at s[i], or -1.
+function closes(s: string, i: number): number {
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    const ch = s[j];
+    if ((ch === "-" || ch === "=") && s[j + 1] === ">") { j++; continue; }
+    if (ch === "<" || ch === "{" || ch === "(") depth++;
+    if (ch === ">" || ch === "}" || ch === ")") depth--;
+    if (depth === 0) return j;
+  }
+  return -1;
+}
+
+const uncomment = (l: string) => l.replace(/\s*#.*$/, "");
+
+// A def header may run over several lines: up to the line where its brackets
+// close and it ends in ":". A constructor may too: up to the line where its
+// braces close. Each is joined into one line, with a trailing comment dropped,
+// so the readers below see one header or one constructor per line.
+// A constructor's fields may also be separated by line breaks alone.
+function logicalLines(src: string): string[] {
   const lines = src.split("\n");
+  const out: string[] = [];
+  let inType = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (!/^\s/.test(line) && line.trim() !== "") inType = line.startsWith("type ");
+    const header = line.startsWith("def ");
+    const ctor = inType && /^\s+[A-Za-z_][\w.]*\{/.test(line);
+    if (header || ctor) {
+      line = uncomment(line);
+      const done = (l: string) => depthOf(l) <= 0 && (!header || /:$/.test(l.trimEnd()));
+      while (!done(line) && i + 1 < lines.length && (depthOf(line) > 0 || /^\s/.test(lines[i + 1]))) {
+        const next = uncomment(lines[++i]).trim();
+        if (next === "") continue;
+        const prev = line.trimEnd();
+        const sep = /[(<{,]$/.test(prev) || /^[)>}]/.test(next) ? "" : ctor && depthOf(prev) === 1 ? ", " : " ";
+        line = prev + sep + next;
+      }
+      line = line.replace(/,\s*([)}])/g, "$1");
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+export function readDecls(src: string): { datas: Data[]; defs: Def[] } {
+  const lines = logicalLines(src);
   const datas: Data[] = [];
   const defs: Def[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith("type ")) {
       // A type may take type parameters of kind Data: `type Both<A: Data, B: Data> is Data:`.
-      const m = line.match(/^type ([A-Za-z_][\w.]*)(?:<(.*)>)? is Data:\s*$/);
+      // `is Type:` declares constructors the runtime encodes as it does Data's.
+      const m = uncomment(line).match(/^type ([A-Za-z_][\w.]*)(?:<(.*)>)? is (?:Data|Type):\s*$/);
       if (!m) fail(`only "type X is Data:" or "type X<A: Data, ...> is Data:" is supported: ${line}`);
+      // A parameter's mark (`<-A: Data>`) is not part of its name.
       const tparams = m[2] ? splitTop(m[2]).map(nameType).map(([n, k]) => {
         if (k !== "Data") fail(`type ${m[1]}: a type parameter of kind ${k} (only Data is supported): ${line}`);
-        return n;
+        return n.replace(/^[+-]/, "");
       }) : [];
       // The body is every indented line up to the next line that is not
       // indented and not blank. A blank line or a comment inside it is bend's
@@ -103,15 +164,24 @@ export function readDecls(src: string): { datas: Data[]; defs: Def[] } {
       for (; i < end; i++) {
         const text = lines[i + 1].trim();
         if (text === "" || text.startsWith("#")) continue;
-        const c = text.match(/^([A-Za-z_]\w*)\{(.*)\}$/);
+        // A constructor's tag is its name as written, dots and all.
+        const c = text.match(/^([A-Za-z_][\w.]*)\{(.*)\}$/);
         if (!c) fail(`a constructor of ${m[1]} is not Name{field: Type, ...}: ${lines[i + 1]}`);
         ctors.push({ name: c[1], fields: splitTop(c[2]).map(nameType) });
       }
       datas.push({ name: m[1], tparams, ctors });
     } else if (line.startsWith("def ")) {
-      const m = line.match(/^def ([A-Za-z_][\w.]*)\((.*)\) -> (.*):\s*$/);
-      if (!m) fail(`a def header this tool cannot read: ${line}`);
-      const raw = splitTop(m[2]).map(nameType);
+      // A def after its law takes bare names and no "->": its type is the law's,
+      // and it is a proof, not a def a host calls.
+      // `def f?(..)` is an unsafe def; the ? is not part of its name.
+      const h = line.match(/^def ([A-Za-z_][\w.]*)\??\(/);
+      const close = h ? closes(line, h[0].length - 1) : -1;
+      if (h && /^:\s*$/.test(line.slice(close + 1))) continue;
+      const r = close < 0 ? null : line.slice(close + 1).match(/^\s*->\s*(.*):\s*$/);
+      if (!h || !r) fail(`a def header this tool cannot read: ${line}`);
+      const m = [line, h[1], line.slice(h[0].length, close), r[1]];
+      // A bare name (`a` in `f(a, -A: Kind(a))`) is a quantity: erased.
+      const raw = splitTop(m[2]).map((p): [string, string] => /^[A-Za-z_]\w*$/.test(p) ? ["-" + p, "Quant"] : nameType(p));
       // An erased parameter (-A) has no runtime position this tool can vouch
       // for; such a def is kept out of the module (see `hostable`).
       const erased = raw.some(([n]) => n.startsWith("-"));
@@ -127,6 +197,10 @@ function topArrow(t: string): number {
   let depth = 0;
   for (let i = 0; i < t.length - 1; i++) {
     const ch = t[i];
+    if (ch === "=" && t[i + 1] === ">") {
+      i++; // a lambda's => is not a closing bracket
+      continue;
+    }
     if (ch === "-" && t[i + 1] === ">") {
       if (depth === 0) return i;
       i++; // the > of a nested arrow is not a closing bracket
@@ -134,6 +208,20 @@ function topArrow(t: string): number {
     }
     if (ch === "<" || ch === "{" || ch === "(") depth++;
     if (ch === ">" || ch === "}" || ch === ")") depth--;
+  }
+  return -1;
+}
+
+// The index of the first "&" outside <...>, {...} and (...), or -1: the pair
+// `A & B`. (A quantity, `&2`, is only ever inside <...>.)
+function topAmp(t: string): number {
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if ((ch === "-" || ch === "=") && t[i + 1] === ">") { i++; continue; }
+    if (ch === "<" || ch === "{" || ch === "(") depth++;
+    if (ch === ">" || ch === "}" || ch === ")") depth--;
+    if (ch === "&" && depth === 0) return i;
   }
   return -1;
 }
@@ -159,6 +247,8 @@ const PREAMBLE = [
   "export type BendResult<E, A> = { $: \"Fail\"; error: E } | { $: \"Done\"; value: A };",
   "export type BendEither<A, B> = { $: \"Inl\"; value: A } | { $: \"Inr\"; value: B };",
   "export type BendUnit = { $: \"Unit\" };",
+  "export type BendPair<A, B> = { $: \"Tuple\"; fst: A; snd: B };",
+  "export type BendCmp = { $: \"LT\" } | { $: \"EQ\" } | { $: \"GT\" };",
 ];
 // The names the preamble declares. They are public (a host imports them), so a
 // data type of the same name is refused rather than renamed.
@@ -167,7 +257,13 @@ const PREAMBLE_TYPES = new Set(PREAMBLE.map((l) => l.match(/^export type (\w+)/)
 // A Bend type as the runtime encodes it. `scope` maps a data type's name, as
 // the module that uses it writes it, to its TypeScript name.
 function tsType(t: string, datas: Map<string, string>, where: string): string {
+  // A + before a type (`+List<Json>`) fills its quantities; the value is the same.
+  t = t.replace(/^\+/, "");
+  // A parenthesized type, (A & B), is the type inside.
+  if (t.startsWith("(") && closes(t, 0) === t.length - 1) return tsType(t.slice(1, -1).trim(), datas, where);
   if (t === "Nat") return "number";
+  // An F32 is the runtime's JS number, rounded to single precision.
+  if (t === "F32") return "number";
   if (t === "Bool") return "boolean";
   if (t === "String") return "string";
   if (t === "U32") return "number";
@@ -175,11 +271,18 @@ function tsType(t: string, datas: Map<string, string>, where: string): string {
   // String.fromCodePoint; Char.to_u32 is codePointAt(0)).
   if (t === "Char") return "string";
   if (t === "Unit") return "BendUnit";
+  if (t === "Cmp") return "BendCmp";
   // A function type, A -> B, split at its first top-level arrow. The runtime
   // passes a closure as a plain JS function of one argument.
   const arrow = topArrow(t);
   if (arrow >= 0) {
     return `((x: ${tsType(t.slice(0, arrow).trim(), datas, where)}) => ${tsType(t.slice(arrow + 2).trim(), datas, where)})`;
+  }
+  // A pair, A & B, split at its first top-level & (so A & B & C is A & (B & C)):
+  // the runtime's {$: "Tuple", fst, snd}.
+  const amp = topAmp(t);
+  if (amp >= 0) {
+    return `BendPair<${tsType(t.slice(0, amp).trim(), datas, where)}, ${tsType(t.slice(amp + 1).trim(), datas, where)}>`;
   }
   const app = t.match(/^([A-Za-z_][\w.]*)<(.*)>$/);
   if (app && !GENERICS[app[1]] && datas.has(app[1])) {
@@ -196,7 +299,7 @@ function tsType(t: string, datas: Map<string, string>, where: string): string {
     }
     return `${g.ts}<${types.map((a) => tsType(a, datas, where)).join(", ")}>`;
   }
-  if (/^[A-Z]$/.test(t) && datas.has("$param:" + t)) return t;
+  if (datas.has("$param:" + t)) return t;
   const known = datas.get(t);
   if (known) return known;
   return fail(`${where}: no TypeScript encoding for the Bend type ${t}`);
@@ -214,6 +317,51 @@ const RESERVED = new Set([
 ]);
 const bindable = (n: string) => IDENT.test(n) && !RESERVED.has(n);
 
+// bend's library of hub packages: BEND_LIB, else ~/.bend/lib, as bend reads it.
+const bendLib = () => resolve(process.env.BEND_LIB ?? join(homedir(), ".bend", "lib"));
+
+export interface Import { alias: string; path: string }
+
+// The `import <path> as <Alias>` lines at the head of a .bend file, each
+// resolved as bend resolves it: a relative path from the file's directory; a
+// "0x<hash>/..." path inside the library; a "<name>@<version>/..." path through
+// the hash the library records for that name (bend writes it when it fetches
+// the package, so the core is compiled before this is read). Imports end at
+// the first line that is not an import, a comment or blank, as in bend.
+export function importsOf(file: string): Import[] {
+  const out: Import[] = [];
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const t = line.trim();
+    if (t === "" || t.startsWith("#")) continue;
+    if (!/^import(\s|$)/.test(t)) break;
+    const m = t.match(/^import\s+(\S+\.bend)\s+as\s+([A-Za-z_]\w*)\s*(?:#.*)?$/);
+    if (!m) continue; // import Base
+    let spec = m[1];
+    const nv = spec.match(/^([^/]*@[^/]*)\//);
+    if (nv) {
+      const at = join(bendLib(), "names", nv[1]);
+      if (!existsSync(at)) fail(`${file} imports ${spec}, and ${at}, where bend records its hash, is not there`);
+      spec = readFileSync(at, "utf8").trim() + spec.slice(nv[1].length);
+    }
+    const target = /^0x[0-9a-f]+\//.test(spec) ? join(bendLib(), spec) : resolve(dirname(file), spec);
+    if (!existsSync(target)) fail(`${file} imports ${m[1]}, and ${target} is not there`);
+    out.push({ alias: m[2], path: realpathSync(target) });
+  }
+  return out;
+}
+
+// The name bend gives a file's defs in the module, before the def's own name:
+// its path without ".bend", from the library for a hub file, else from the
+// core's directory, then ":".
+function namespaceOf(file: string, top: string): string {
+  const lib = existsSync(bendLib()) ? realpathSync(bendLib()) + "/" : "\0";
+  return (file.startsWith(lib) ? file.slice(lib.length) : relative(top, file)).replace(/\.bend$/, "") + ":";
+}
+
+// A data type's TypeScript name: a dotted Bend name (Parse.Cur) is written
+// with _ (Parse_Cur); two types that come out the same are refused below.
+const tsName = (n: string) => n.replace(/\./g, "_");
+
 // A module's data types, with the scope its own fields are read in: its own
 // types, and those of the modules it imports, by the alias it gives them.
 export interface Module { prefix: string; datas: Data[]; scope: Map<string, string> }
@@ -224,13 +372,12 @@ export function modules(path: string, prefix = "", seen = new Set<string>()): Mo
   const src = readFileSync(path, "utf8");
   const { datas } = readDecls(src);
   const scope = new Map<string, string>();
-  for (const d of datas) scope.set(d.name, prefix + d.name);
+  for (const d of datas) scope.set(d.name, prefix + tsName(d.name));
   const out: Module[] = [];
-  for (const m of src.matchAll(/^import (\.{1,2}\/\S+\.bend) as ([A-Za-z_]\w*)\s*$/gm)) {
-    const dep = resolve(dirname(path), m[1]);
-    const depPrefix = `${prefix}${m[2]}_`;
+  for (const { alias, path: dep } of importsOf(path)) {
+    const depPrefix = `${prefix}${alias}_`;
     const sub = modules(dep, depPrefix, seen);
-    for (const d of sub[0].datas) scope.set(`${m[2]}.${d.name}`, depPrefix + d.name);
+    for (const d of sub[0].datas) scope.set(`${alias}.${d.name}`, depPrefix + tsName(d.name));
     if (!seen.has(dep + depPrefix)) {
       seen.add(dep + depPrefix);
       out.push(...sub);
@@ -244,7 +391,7 @@ export function declarations(mods: Module[], defs: Def[], undeclared?: string[])
   const written = new Map<string, string>();
   for (const { prefix, datas, scope } of mods) {
     for (const d of datas) {
-      const name = prefix + d.name;
+      const name = prefix + tsName(d.name);
       if (!IDENT.test(name)) fail(`type ${d.name}: not a TypeScript identifier`);
       if (PREAMBLE_TYPES.has(name)) fail(`type ${d.name}: the name of a type bend-emit declares for Base (${[...PREAMBLE_TYPES].join(", ")}); rename it`);
       // An import is written <alias>_<Type>, which a local type or another
@@ -350,20 +497,20 @@ export function exportsOf(raw: string, names: string[]): string {
   ].join("\n");
 }
 
-// The export-name prefixes of every .bend file a core reaches, transitively.
-// bend names an imported def by the import path as written in the file that
-// imports it, with "./" dropped, then ":": "../keys/core:" from comp,
-// "generics:" for "./generics.bend". (Through bend 2.0.37 the separator was ".".)
+// The export-name prefixes of every .bend file a core reaches, transitively
+// (see namespaceOf): "../keys/core:" from comp, "generics:" for
+// "./generics.bend", "0x<hash>/bytes:" for a hub file. (Through bend 2.0.37
+// the separator was ".".)
 //
 // A constructor's tag needs no such care: since 2.0.38 bend tags it with its
 // name in the file that declares it ("TooBig", not "generics.TooBig"), which is
 // the name the .d.mts and every host that builds values by hand speak.
-export function importPrefixes(path: string, seen = new Set<string>(), out = new Set<string>()): Set<string> {
+export function importPrefixes(path: string, top = dirname(realpathSync(path)), seen = new Set<string>(), out = new Set<string>()): Set<string> {
   if (seen.has(path)) return out;
   seen.add(path);
-  for (const m of readFileSync(path, "utf8").matchAll(/^import (\.{1,2}\/\S+)\.bend as \w+\s*$/gm)) {
-    out.add(m[1].replace(/^\.\//, "") + ":");
-    importPrefixes(resolve(dirname(path), m[1] + ".bend"), seen, out);
+  for (const { path: dep } of importsOf(path)) {
+    out.add(namespaceOf(dep, top));
+    importPrefixes(dep, top, seen, out);
   }
   return out;
 }
@@ -383,25 +530,30 @@ export async function build(corePath: string, outDir: string): Promise<Built> {
 }
 
 async function buildCore(core: string, outDir: string, lenient: boolean): Promise<Built> {
+  // First, so bend has fetched every hub package the core imports.
+  const compiled = bundle(core);
   const { defs } = readDecls(readFileSync(core, "utf8"));
-  // bend exports every filled def that is not IO (main is the usual one),
-  // except a def with a template parameter (~rule: bend's .mjs target does not
-  // export it). Of those, the .d.mts declares the defs whose types it can write:
-  // not one with an erased parameter (-A has no runtime position this tool can
-  // vouch for), and not one whose type depends on a value (a type computed by
-  // a def, like Meaning(s), is not a TypeScript type). Those stay in the
-  // module, undeclared, so the export check below still sees them.
-  const lib = defs.filter((d) => !d.ret.startsWith("IO(") && !d.params.some(([n]) => n.startsWith("~")));
+  // bend exports every filled def whose whole type is not IO -- so not a
+  // def with no parameters that returns IO (main is the usual one), but a
+  // def with parameters that returns IO, yes -- except a def with a template
+  // parameter (~rule: bend's .mjs target does not export it). Of those, the
+  // .d.mts declares the defs whose types it can write: not one returning IO,
+  // not one with an erased parameter (-A has no runtime position this tool
+  // can vouch for), and not one whose type depends on a value (a type
+  // computed by a def, like Meaning(s), is not a TypeScript type). Those stay
+  // in the module, undeclared, so the export check below still sees them.
+  const lib = defs.filter((d) => !(d.params.length === 0 && d.ret.startsWith("IO(")) && !d.params.some(([n]) => n.startsWith("~")));
   // A def returning Data or Type computes a type; an imported one is written
   // under its alias (S.Meaning).
   const computing = (src: string) => readDecls(src).defs.filter((d) => d.ret === "Data" || d.ret === "Type").map((d) => d.name);
   const computed = new Set(computing(readFileSync(core, "utf8")));
-  for (const m of readFileSync(core, "utf8").matchAll(/^import (\.{1,2}\/\S+\.bend) as ([A-Za-z_]\w*)\s*$/gm)) {
-    for (const d of computing(readFileSync(resolve(dirname(core), m[1]), "utf8"))) computed.add(`${m[2]}.${d}`);
+  for (const { alias, path } of importsOf(core)) {
+    for (const d of computing(readFileSync(path, "utf8"))) computed.add(`${alias}.${d}`);
   }
   const esc = (x: string) => x.replace(/\./g, "\\.");
-  const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}\\(`).test(t)) || computed.has(t);
-  const hostable = (d: Def) => !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
+  // A use is the name, applied (Meaning(s)) or not (Var, a def of no parameters).
+  const dependent = (t: string) => [...computed].some((c) => new RegExp(`(^|[^\\w.])${esc(c)}(?![\\w.])`).test(t));
+  const hostable = (d: Def) => !d.ret.startsWith("IO(") && !d.erased && !computed.has(d.name) && !dependent(d.ret) && !d.params.some(([, t]) => dependent(t));
   const undeclared: string[] = [];
   const dts = declarations(modules(core), lib.filter(hostable), lenient ? undeclared : undefined);
   // Shape (B), a constructor whose last field is the self-call, becomes a loop
@@ -409,7 +561,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   // Base's String.order.go, which every String comparison goes through, gets a
   // native equivalent (see intrinsics.ts). Before any of them, each call through
   // a `$f` entry is written back as a direct call (see entries.ts).
-  const ent = entries(bundle(core));
+  const ent = entries(compiled);
   const intr = intrinsics(ent.js);
   const looped = loopify(lazySelect(intr.js).js);
   const peeled = peel(looped.js);

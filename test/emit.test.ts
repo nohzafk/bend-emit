@@ -2,8 +2,8 @@
 // at run time, and what is refused. test.sh builds dist/ first.
 
 import { describe, expect, test } from "bun:test";
-import { bundle, declarations, readDecls } from "../src/emit";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { build, bundle, declarations, importPrefixes, importsOf, modules, readDecls } from "../src/emit";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -283,5 +283,97 @@ describe("an imported data type whose TypeScript name is another type's", () => 
   });
   test("distinct names pass", () => {
     expect(declarations([mod("", ["A"]), mod("G_", ["Err"])], [])).toContain("export type G_Err");
+  });
+});
+
+describe("source as hub packages write it", () => {
+  // The first data type and the first def of a source, as read.
+  const one = (src: string) => readDecls(src);
+
+  test("a def header over several lines, its ) at the margin, with a trailing comment", () => {
+    const { defs } = one("def f(\n  a: Nat,\n  +b: List<&2, Nat>,\n) ->\n  Nat:  # noqa: L001\n  a\n");
+    expect(defs).toEqual([{ name: "f", params: [["a", "Nat"], ["b", "List<&2, Nat>"]], ret: "Nat", erased: false }]);
+    expect(sig("def f(\n  a: Nat,\n  b: Bool\n) -> Nat:")).toBe("export declare function f(a: number, b: boolean): number;");
+  });
+
+  test("a constructor over several lines, its fields split by commas or by line breaks", () => {
+    const { datas } = one("type T is Data:\n  A{x: Nat,\n    y: String}\n  B{\n    x: List<&2, Nat>\n    y: Bool\n  }\n");
+    expect(datas[0].ctors).toEqual([
+      { name: "A", fields: [["x", "Nat"], ["y", "String"]] },
+      { name: "B", fields: [["x", "List<&2, Nat>"], ["y", "Bool"]] },
+    ]);
+  });
+
+  test("a def body that looks like a constructor is not joined to what follows", () => {
+    const { datas, defs } = one("def f(a: Nat, b: Nat) -> Bool:\n  Foo{a < b}\n\ntype T is Data:\n  T{}\n\ndef g() -> Nat:\n  0n\n");
+    expect(datas.map((d) => d.name)).toEqual(["T"]);
+    expect(defs.map((d) => d.name)).toEqual(["f", "g"]);
+  });
+
+  test("is Type, a + before a field's type, marked and long type parameters, dotted names", () => {
+    const { datas } = one("type Box<-KE: Data> is Type:\n  Box.Full{xs: +List<KE>}\n  Box.None{}\n\ntype Parse.Cur is Data:\n  Cur{at: Nat}\n");
+    expect(datas[0]).toEqual({ name: "Box", tparams: ["KE"], ctors: [{ name: "Box.Full", fields: [["xs", "+List<KE>"]] }, { name: "Box.None", fields: [] }] });
+    const scope = new Map(datas.map((d) => [d.name, d.name.replace(/\./g, "_")] as [string, string]));
+    const dts = declarations([{ prefix: "", datas, scope }], []);
+    expect(dts).toContain('export type Box<KE> = { $: "Box.Full"; "xs": BendList<KE> } | { $: "Box.None" };');
+    expect(dts).toContain('export type Parse_Cur = { $: "Cur"; "at": number };');
+  });
+
+  test("a def after its law (bare names, no ->) is a proof, not read; a bare name is a quantity", () => {
+    const { defs } = one("def Laws.round_trip(v):\n  {==}\n\ndef k(a, -A: Kind(a), n: Nat) -> Nat:\n  n\n\ndef io?(n: Nat) -> IO(Unit):\n  IO.print(\"\")\n");
+    expect(defs.map((d) => [d.name, d.erased])).toEqual([["k", true], ["io", false]]);
+  });
+
+  test("F32, Cmp, and the pair A & B, parenthesized or not", () => {
+    expect(sig("def f(x: F32, c: Cmp) -> Nat & (Bool & String):")).toBe(
+      "export declare function f(x: number, c: BendCmp): BendPair<number, BendPair<boolean, string>>;",
+    );
+    expect(sig("def f(p: List<&2, String & Nat>) -> (Nat & Nat) -> Nat:")).toBe(
+      "export declare function f(p: BendList<BendPair<string, number>>): ((x: BendPair<number, number>) => number);",
+    );
+  });
+});
+
+describe("an import from the hub", () => {
+  test("0x<hash>/ and <name>@<version>/ are read from BEND_LIB, and named as bend names them", () => {
+    const lib = mkdtempSync(join(tmpdir(), "bend-emit-lib-"));
+    const local = mkdtempSync(join(tmpdir(), "bend-emit-core-"));
+    const hash = "0x" + "ab".repeat(16);
+    mkdirSync(join(lib, hash), { recursive: true });
+    mkdirSync(join(lib, "names"), { recursive: true });
+    writeFileSync(join(lib, "names", "pkg@1.0.0.0"), hash + "\n");
+    writeFileSync(join(lib, hash, "bytes.bend"), "import Base\nimport ./more.bend as M\n\ntype Bytes is Data:\n  Bytes{n: Nat}\n");
+    writeFileSync(join(lib, hash, "more.bend"), "import Base\n");
+    writeFileSync(join(local, "core.bend"), "import Base\n# a comment between imports\nimport pkg@1.0.0.0/bytes.bend as B  # bytes\nimport ./side.bend as S\n\ndef n(b: B.Bytes) -> Nat:\n  0n\n");
+    writeFileSync(join(local, "side.bend"), "import Base\nimport " + hash + "/more.bend as M\n");
+    const was = process.env.BEND_LIB;
+    process.env.BEND_LIB = lib;
+    try {
+      const core = join(local, "core.bend");
+      expect(importsOf(core).map((i) => [i.alias, i.path])).toEqual([
+        ["B", realpathSync(join(lib, hash, "bytes.bend"))],
+        ["S", realpathSync(join(local, "side.bend"))],
+      ]);
+      expect([...importPrefixes(core)].sort()).toEqual([hash + "/bytes:", hash + "/more:", "side:"]);
+      const mods = modules(core);
+      expect(mods[0].scope.get("B.Bytes")).toBe("B_Bytes");
+      const { defs } = readDecls(readFileSync(core, "utf8"));
+      expect(declarations(mods, defs)).toContain("export declare function n(b: B_Bytes): number;");
+    } finally {
+      if (was === undefined) delete process.env.BEND_LIB; else process.env.BEND_LIB = was;
+    }
+  });
+});
+
+describe("a def that returns IO", () => {
+  test("with parameters, bend exports it: it stays in the module, undeclared; main does not", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bend-emit-io-"));
+    const core = join(dir, "io.bend");
+    writeFileSync(core, "import Base\n\ndef add(a: Nat, b: Nat) -> Nat:\n  (a + b : Nat)\n\ndef hello(n: Nat) -> IO(Unit):\n  IO.print(\"hi\")\n\ndef main() -> IO(Unit):\n  IO.print(\"main\")\n");
+    const r = await build(core, join(dir, "out"));
+    const dts = readFileSync(r.dts, "utf8");
+    expect(dts).toContain("export declare function add(a: number, b: number): number;");
+    expect(dts).not.toContain("hello");
+    expect(Object.keys((await import(r.js)).default).sort()).toEqual(["add", "hello"]);
   });
 });

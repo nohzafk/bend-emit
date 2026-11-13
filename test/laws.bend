@@ -23,12 +23,17 @@ def spec_checked(n: Nat) -> Nat:
   n
 
 # Takes a Base type with no TypeScript encoding.
-def spec_cmp(c: Cmp) -> Nat:
+def spec_image(i: Image) -> Nat:
   0n
 
 # Names a def with no encoding; stays in the module, undeclared.
-def spec_cmp_zero() -> Nat:
-  spec_cmp(Nat.cmp(1n, 2n))
+def spec_image_zero() -> Nat:
+  spec_image(Pix{0})
+
+# Names a bend-mathlib lemma through the alias of a dropped import.
+def spec_via_mathlib(n: Nat) -> Nat:
+  %MN.add_zero(n) : {(n + 0n : Nat) == n : Nat}
+  n
 
 law double_zero:
   {spec_double(0n) == 0n : Nat}

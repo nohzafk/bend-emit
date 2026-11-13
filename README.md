@@ -91,6 +91,10 @@ JavaScript interface to a schema checker written in Bend.
 
 bend-emit runs `bend <core.bend> -o <out>.mjs`, then processes the emitted
 module and reads the source's data declarations and definition headers.
+A header or a constructor may span several lines. The data types of every
+imported file are read too: a relative import, and a hub package imported as
+`0x<hash>/...` or `<name>@<version>/...`, which is read from `BEND_LIB`
+(default `~/.bend/lib`) where bend fetched it.
 
 Bend exports a default object. bend-emit adds named exports for its definitions
 while retaining the default export's interface. It checks that the source
@@ -102,12 +106,15 @@ Supported types follow Bend's runtime representation:
 | --- | --- |
 | `Nat` | `number`: a whole number from 0 to 2^53 |
 | `U32` | `number` |
+| `F32` | `number`, rounded to single precision |
 | `Bool` | `boolean` |
 | `String` | `string` |
 | `Char` | `string` containing one code point |
 | `Map<A>` | `BendMap<A>`: a tagged tree with `MTip`, `MLeaf`, and `MNode` |
+| `A & B` | `BendPair<A, B>`: `{ $: "Tuple", fst, snd }` |
+| `Cmp` | `BendCmp`: `LT`, `EQ` or `GT` |
 
-The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, and `BendEither` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
+The generated declaration preamble defines `BendList`, `BendMap`, `BendMaybe`, `BendResult`, `BendEither`, `BendPair`, and `BendCmp` using the runtime's tagged constructors. A `BendMap` is not a native JavaScript `Map`; its `MNode.pos` field is a `number`, like Bend's `Nat` representation. The map's structural invariants are those of the Bend `Map` implementation; bend-emit only describes its runtime shape.
 
 ### Runtime Transformations
 
@@ -184,7 +191,7 @@ header line is not recognized. A file with nothing to skip is built from its
 own path, exactly as before.
 
 In such a build, a def with no TypeScript encoding (for example one whose type
-is a Base type such as `Cmp`) stays in the `.mjs` and is left out of the
+is a Base type such as `Image`) stays in the `.mjs` and is left out of the
 `.d.mts`, with one warning line naming it. In an ordinary core it is still an
 error.
 
