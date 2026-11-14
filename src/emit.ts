@@ -29,6 +29,7 @@ import { intrinsics, type Native, type Skipped } from "./intrinsics";
 import { entries, type Entry } from "./entries";
 import { loopify, type Stayed } from "./loops";
 import { lazySelect } from "./select";
+import { lazyArgs, type Reverted } from "./lazy";
 import { classify } from "./classes";
 import { runtimeTree } from "./laws";
 import { peel, type Kept, type Peeled } from "./strpeel";
@@ -76,7 +77,7 @@ export function exportsOf(raw: string, names: string[]): string {
   ].join("\n");
 }
 
-type Built = { js: string; dts: string; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; entered: Entry[]; undeclared: string[] };
+type Built = { js: string; dts: string; eager: Reverted[]; stayed: Stayed[]; kept: Kept[]; peeled: Peeled[]; native: Native[]; skipped: Skipped[]; entered: Entry[]; undeclared: string[] };
 
 // A file that holds laws or lemmas is built from a copy without them (see
 // laws.ts), and there a def with no TypeScript type is left out of the .d.mts
@@ -104,10 +105,13 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
   // (see loops.ts); what stays a JavaScript recursion is reported by main.
   // Base's String.order.go, which every String comparison goes through, gets a
   // native equivalent (see intrinsics.ts). Before any of them, each call through
-  // a `$f` entry is written back as a direct call (see entries.ts).
+  // a `$f` entry is written back as a direct call (see entries.ts). A call only
+  // some paths read is moved to those paths (see select.ts, lazy.ts) before the
+  // loops are made, so that a self-call among them becomes a loop step.
   const ent = entries(compiled);
   const intr = intrinsics(ent.js);
-  const looped = loopify(lazySelect(intr.js).js);
+  const lazied = lazyArgs(lazySelect(intr.js).js);
+  const looped = loopify(lazied.js);
   const peeled = peel(looped.js);
   const chunk = classify(peeled.js);
   const js = exportsOf(chunk, names);
@@ -132,7 +136,7 @@ async function buildCore(core: string, outDir: string, lenient: boolean): Promis
     fail(`the checked core's defs and the module's exports differ:\n  core: ${want.join(", ")}\n  module: ${have.join(", ")}`);
   }
   writeFileSync(dtsPath, head + dts);
-  return { js: jsPath, dts: dtsPath, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, entered: ent.kept, undeclared };
+  return { js: jsPath, dts: dtsPath, eager: lazied.reverted, stayed: looped.stayed, kept: peeled.kept, peeled: peeled.peeled, native: intr.native, skipped: intr.skipped, entered: ent.kept, undeclared };
 }
 
 if (import.meta.main) {
@@ -144,6 +148,7 @@ if (import.meta.main) {
   try {
     const r = await build(core, out);
     console.log(`wrote ${r.js} and ${r.dts}`);
+    for (const e of r.eager) console.log(`still eager: ${e.name.replace(/^\$|\$$/g, "")} (${e.reason})`);
     for (const d of r.stayed) console.log(`still recursive: ${d.name.replace(/^\$|\$$/g, "")} (${d.reason})`);
     for (const k of r.kept) console.log(`string still sliced: ${k.name.replace(/^\$|\$$/g, "")} (${k.param}: ${k.reason})`);
     for (const s of r.skipped) console.log(`not made native: ${s.name.replace(/^\$|\$/g, "")} (${s.reason})`);

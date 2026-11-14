@@ -152,6 +152,10 @@ allocation at scale:
   direct call, so the passes below see a def's self-calls.
 - **Lazy selectors:** a call to a def that only picks one of two parameters
   by a `Bool` runs only the chosen argument.
+- **Lazy arguments:** a call whose result only some paths read runs on those
+  paths only: an argument of a helper def that branches, or the right side
+  of `Bool.or` and `Bool.and`. A search written with such a helper stops at
+  its first hit.
 - **Recursion to loops:** the self-call evaluated last in a `return` becomes
   a loop step, with the rest of the expression kept on a heap stack.
 - **Native string comparison:** Base's `String.order.go` becomes a native
@@ -163,8 +167,8 @@ allocation at scale:
 
 Each pass matches the exact text Bend 2.0.40 writes. Where the shape is not
 there, the code stays as Bend wrote it, and the command prints a diagnostic
-(`still recursive:`, `string still sliced:`, `not made native:`,
-`call kept through an entry:`). The passes do not make every recursion
+(`still eager:`, `still recursive:`, `string still sliced:`,
+`not made native:`, `call kept through an entry:`). The passes do not make every recursion
 stack-safe or every core smaller. Review the diagnostics and measure your own
 workload.
 
@@ -208,7 +212,8 @@ Template definitions are not exported by Bend's ES-module target.
 With Bend 2.0.40, bend-emit builds all 115 pure BendHub packages that Bend
 itself compiles, and every generated `.d.mts` typechecks under `strict`.
 Across those packages, 17,656 calls of their exported defs gave the same
-result before and after bend-emit's passes. On
+result before and after bend-emit's passes. A core that searches a list
+through a helper def went from 29 s in Bend's own JavaScript to 0.16 s. On
 [bend-csv](https://github.com/nohzafk/bend-csv)'s benchmark, a 10 MB parse
 takes 234 ms, against 318 ms for Deno's `@std/csv`.
 

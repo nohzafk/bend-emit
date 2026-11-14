@@ -66,7 +66,7 @@ each file (`importsOf`, `prefixes`).
 5. **Declarations** (`declarations`): every data type the core reaches, and
    each exported def whose type has an encoding (section 3).
 6. **Runtime passes**, in this order: `entries`, `intrinsics`, `select`,
-   `loops`, `strpeel`, `classes` (section 4).
+   `lazy`, `loops`, `strpeel`, `classes` (section 4).
 7. **Named exports** (`exportsOf`): Bend's `export default { ... }` is bound
    to `be$default`, and each def is re-exported from it under its own name.
    Bend never writes a name that starts with `be$`, so these names cannot
@@ -199,6 +199,73 @@ finds selectors by shape, in imported files too.
 - **A call anywhere else** becomes `(b ? X : Y)`, unless `X` or `Y` calls the
   enclosing def. Such a call stays eager.
 
+### `lazy`: Lazy Arguments
+
+A Bend `match` can test only a name, and a def cannot call a later def that
+calls it back. So a core that branches on a computed value does it through a
+helper def, and passes that def the result of each branch as an argument:
+
+```python
+def put(hit: Bool, +at: Nat, rest: Found) -> Found:
+  match hit:
+    case True{}:  Hit{at}
+    case False{}: rest
+...
+      put(Nat.is_eq(head, n), at, search(tail, n, 1n+at))
+```
+
+Bend runs `search(tail, ...)` before it calls `put`, so the search walks the
+whole list even when the first element is the hit. Base's `Bool.and` is such
+a helper, and `Bool.or` is emitted as two `const`s and a `||`, which
+computes the right side first as well.
+
+The pass moves such a call to the paths that read it, with four rewrites. It
+sweeps over a def until a sweep changes nothing; a bound on the sweeps, which
+grows with the def's size, stops a def that would not settle:
+
+- **inline:** `return h(args)` becomes the body of `h`, when some path of
+  `h` does not read a parameter and the argument in that position holds a
+  call. Each argument that is not a name is bound to a `const` first, in
+  order, and the locals of `h` get new names. `h` stays in the module.
+- **lift:** `return (A || B)` and `return (A && B)` become an `if`, when
+  `B` holds a call or names a `const` that does.
+- **sink:** a `const` that holds a call, followed by an `if` that reads it in
+  some arms only, moves into those arms.
+- **fold:** a `const` the pass wrote, read once by the `return` or `if` that
+  follows, is written in place. So is a `const` read once as the right side
+  of `||` or `&&`.
+
+For the example, `search` becomes `if (is_eq(head, n)) return Hit;
+else return search(tail, ...)`, and `loops` turns the self-call into a loop
+step.
+
+What the pass keeps:
+
+- **No path computes more.** Each path runs a subset of the calls it ran
+  before, with the same arguments, so each value is the same.
+- **A loop stays a loop.** A self-call is never folded under `||` or `&&`.
+  When a def that `loops` could make a loop is one it could not after these
+  rewrites, the def is left as Bend wrote it, and the command prints
+  `still eager:` with the reason. This happens when the helper matches on
+  the recursive result itself.
+- **A string walk stays an index walk.** A def whose string `strpeel` could
+  carry as an index before these rewrites, and could not after them, is left
+  as Bend wrote it as well. This happens when the helper reads only the head
+  of the tail it is given: placed in the walk, it reads that tail there.
+- **Only known shapes.** A def is rewritten, or inlined, only when every line
+  of it is a `const`, a `return`, an `if` chain, a `for (;;)` or bare block,
+  an assignment or a `continue`, and the pass prints it back byte for byte.
+  A helper also holds no closure, does not call itself, and is at most 24
+  statements.
+- **Every name keeps its meaning.** A helper is placed only when each name it
+  declares can take one new name (none is a parameter's, none is declared
+  again in its own scope), and only in a def that binds none of the names the
+  helper reads from the module.
+
+Not covered: a helper call that is not the whole of a `return` (an argument
+of another call, a constructor field), and a helper that is itself
+recursive.
+
 ### `loops`: Recursion to Loops
 
 Bend already turns a tail self-call into `for (;;)`. Any other self-call in a
@@ -273,6 +340,12 @@ the fixture cores.
 - **The passes match exact shapes.** They do not make every recursion
   stack-safe or every core smaller. Read the diagnostics, and measure your
   workload.
+- **`select` and `lazy` skip calls no path reads.** Inside a core this
+  changes no value, because no evaluation has an effect another can see. Two
+  things differ at the edge. A call that would have failed (a `Nat` past the
+  largest immediate, the machine stack) no longer fails the def. And a host
+  that keeps an `Array` it passed in can see that a skipped call did not
+  write to it.
 - **The types say less than Bend does.** An `Array`'s length, a `Word(n)`'s
   width, an index, and a proof passed as `null` are not checked at the
   boundary. The README lists what a host must keep.
@@ -317,8 +390,39 @@ unmodified module, and once in the module after bend-emit's passes. Results:
 - In 5 packages, Bend's own module did not finish within the time budget.
 
 That run took Bend's module from the `bend` CLI. The in-process JavaScript is
-identical to the CLI's, from `// Program` on, for all 115 packages, and the
-passes did not change, so the result carries over.
+identical to the CLI's, from `// Program` on, for all 115 packages.
+
+The check was run again with `lazy` in the pipeline, on the same modules and
+inputs: the same 17,656 calls, **0 mismatches**. For `lazy` it also compared
+the other passes' reports with and without it:
+
+- No def that `loops` made a loop became a recursion, and no string walk
+  `strpeel` carried by index lost that. 24 defs were left eager to keep
+  their loop.
+- `lazy` placed a helper's body at 11,158 returns, and the modules are 0.6%
+  smaller in total.
+- A scan of the emitted JavaScript counted the places where a def computes
+  its own recursion and some path drops the result: 542 before the pass, 126
+  after (proof code left out by name).
+
+The same check on the 78 cores of an application built with bend-emit:
+6,321 calls, 0 mismatches, and 109 such places before the pass, 2 after.
+
+### Benchmark: a Search Through a Helper Def
+
+A scheduler core picks the first ready component of a list with a helper def,
+as in the `lazy` example, once per component. Its input is 3,000 components
+in dependency order, so the first one is always ready, and the eager search
+of the rest is wasted each time (Bun, Apple Silicon, one process per run):
+
+| Components | Bend's own JavaScript | bend-emit 0.5.0 | with `lazy` |
+| :--- | ---: | ---: | ---: |
+| 1,000 | 0.93 s | 3.8 s | 28 ms |
+| 2,000 | 8.6 s | 29 s | 78 ms |
+| 3,000 | 29 s | 97 s | 0.16 s |
+
+The first two columns are one run each; the last is the best of 3. The
+results are equal in every run.
 
 ### Benchmark: bend-csv
 

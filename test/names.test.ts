@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bundle } from "../src/emit";
 
-const FIXTURES = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "closure_last"];
+const FIXTURES = ["generics", "uses", "reuses", "templated", "dependent", "dependent_user", "chars", "maps", "strings", "runtime_names", "closure_last", "lazy"];
 
 // Identifiers outside string literals and `//` comments.
 function idents(js: string): Set<string> {
@@ -96,7 +96,7 @@ export function declared(src: string): string[] {
 }
 
 describe("names bend-emit's own text declares", () => {
-  for (const f of ["loops", "classes", "strpeel", "select", "emit"]) {
+  for (const f of ["loops", "classes", "strpeel", "select", "lazy", "emit"]) {
     test(`src/${f}.ts declares only be$ names`, async () => {
       expect(declared(readFileSync(fileURLToPath(new URL(`../src/${f}.ts`, import.meta.url)), "utf8"))).toEqual([]);
     });
