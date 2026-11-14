@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { peel } from "../src/strpeel";
-import { first, nexts, tails } from "./dist/peel.mjs";
+import { dots, first, nexts, tails } from "./dist/peel.mjs";
 import type { BendList } from "./dist/peel.mjs";
 
 // the text bend 2.0.40 emits for a string's head and tail, and its runtime's
@@ -93,6 +93,53 @@ test("a tail passed to a def that uses it as a string is left alone", () => {
   expect(r.js).toContain("_s_0.slice(char_len(_s_0))");
 });
 
+// the shape bend emits when the head is matched before the step: one tail per arm
+const forked = (b: string) => `function $go$($0, $1) {
+  for (;;) {
+    {
+      const _s_0 = $0;
+      const _n_0 = $1;
+      if (_s_0 === "") {
+        return _n_0;
+      } else {
+        const _c_0 = ${HEAD("_s_0")};
+        if (_c_0 == ".") {
+          const _t_1 = ${TAIL("_s_0")};
+          $0 = _t_1;
+          $1 = _n_0 + 100;
+          continue;
+        } else {
+${b}
+        }
+      }
+    }
+  }
+}`;
+
+test("a walk with a tail in each arm carries every one as an index", () => {
+  const src = reader + "\n\n" + forked(`          const _t_2 = ${TAIL("_s_0")};\n          $0 = _t_2;\n          $1 = _n_0 + $cls$(_t_2);\n          continue;`);
+  const r = peel(src);
+  expect(r.kept).toEqual([]);
+  expect(r.js).not.toContain(".slice(char_len(");
+  expect(r.js).toContain("const be$i_t_1 = be$next(_s_0, be$i_s_0);\n          be$i$0 = be$i_t_1;");
+  expect(r.js).toContain("const be$i_t_2 = be$next(_s_0, be$i_s_0);\n          be$i$0 = be$i_t_2;");
+  expect(r.js).toContain("$cls$(_s_0, be$i_t_2)");
+  const run = (js: string, s: string) => new Function(js + "; return $go$;")()(s, 0);
+  for (const s of ["", "a", ".", "a.b", "..", ".a.b.c", "a😀.b", "😀.", "\uDC00\u0001\u0002\u0003.x"]) expect(run(r.js, s)).toBe(run(src, s));
+});
+
+test("one tail used as a string, or taken without a name, keeps the whole walk as bend wrote it", () => {
+  for (const arm of [
+    `          const _t_2 = ${TAIL("_s_0")};\n          $0 = _t_2;\n          $1 = _n_0 + _t_2.length;\n          continue;`,
+    `          $0 = ${TAIL("_s_0")};\n          $1 = _n_0 + 1;\n          continue;`,
+  ]) {
+    const src = reader + "\n\n" + forked(arm);
+    const r = peel(src);
+    expect(r.kept.map((k) => k.name)).toEqual(["$go$"]);
+    expect(r.js).toContain(forked(arm));
+  }
+});
+
 test("a module without the runtime's char_len(s, at) is left as bend wrote it, and reported", () => {
   const src = (reader + "\n\n" + walker("_acc_0 + _c_0")).replace(RUNTIME, "");
   const r = peel(src);
@@ -120,6 +167,8 @@ test("bend's own head-only walk and reader, built: both carry an index, and a ke
   for (const f of ["$first", "$nexts"]) expect(fnText(js, f)).not.toContain(".slice(char_len(");
   expect(fnText(js, "$first")).toContain("be$head(_s_0, be$i_s_0)");
   expect(fnText(js, "$nexts")).toContain("be$next(_s_0, be$i_s_0)");
+  expect(fnText(js, "$dots")).toStartWith("function $dots($0, $1, be$i$0 = 0) {");
+  expect(fnText(js, "$dots")).not.toContain(".slice(");
   expect(fnText(js, "$tails")).toStartWith("function $tails($0, $1) {");
   expect(fnText(js, "$tails")).toContain(".slice(char_len(_s_0))");
 });
@@ -132,6 +181,9 @@ test("the built walk and reader give Base's values, on ascii, astral and lone su
     const want = c.map((_, i) => (i + 1 < c.length ? c[i + 1].codePointAt(0)! : 0)).reverse();
     expect(list(nexts(s, nil))).toEqual(want);
     expect(list(tails(s, nil))).toEqual(c.map((_, i) => c.slice(i + 1).join("")).reverse());
+  }
+  for (const s of ["", "a", ".", "a.b", "..", ".a.b.c", "abc.def.g", "a😀.b", "x\ud800.y"]) {
+    expect(dots(s, 0)).toBe(cps(s).reduce((n, ch) => n + (ch === "." ? 100 : 1), 0));
   }
   expect(list(nexts("a".repeat(200000), nil)).length).toBe(200000);
 });

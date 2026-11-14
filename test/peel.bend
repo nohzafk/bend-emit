@@ -33,3 +33,18 @@ def tails(+s: String, acc: List<&2, String>) -> List<&2, String>:
       acc
     case SCon{c, t}:
       tails(t, t <> acc)
+
+# A walker that matches on the head before it steps: bend binds the tail once
+# in each arm, and each one is the next step.
+def dots(+s: String, +n: U32) -> U32:
+  match s:
+    case SNil{}:
+      n
+    case SCon{c, t}:
+      match c:
+        case Chr{x}:
+          match x:
+            case 46:
+              dots(t, U32.add(n, 100))
+            case _:
+              dots(t, U32.add(n, 1))
